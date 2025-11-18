@@ -24,3 +24,5 @@ cassandra_data/
 
 # VS Code settings
 .vscode/
+
+/src/generated/prisma
