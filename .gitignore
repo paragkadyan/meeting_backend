@@ -1,11 +1,9 @@
-# Node modules
-node_modules/
 
-# Environment variables
+node_modules/
 .env
 
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -13,7 +11,16 @@ yarn-error.log*
 
 # OS files
 .DS_Store
+Thumbs.db
 
-# TypeScript build output
+# TypeScript build outputs
 dist/
 build/
+
+# Docker  
+pgdata/
+redisdata/
+cassandra_data/
+
+# VS Code settings
+.vscode/
