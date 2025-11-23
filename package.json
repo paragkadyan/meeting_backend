@@ -21,7 +21,7 @@
     "redis": "^5.9.0"
   },
   "devDependencies": {
-    "@prisma/client": "^7.0.0",
+    "@prisma/client": "^6.19.0",
     "@types/cors": "^2.8.19",
     "@types/dotenv": "^6.1.1",
     "@types/express": "^5.0.5",
