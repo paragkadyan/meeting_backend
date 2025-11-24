@@ -4,5 +4,104 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = "postgresql://admin:admin123@localhost:5432/chat_app?schema=public"
+}
+
+
+
+
+enum UserType {
+  REGULAR
+  PREMIUM
+}
+
+enum ConvoType {
+  DIRECT
+  GROUP
+}
+
+enum MemberRole {
+  MEMBER
+  ADMIN
+}
+
+
+
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  password     String
+  name         String?
+  profileURL   String?
+  mobileNumber String?     @unique
+  location     String?
+  dob          DateTime?
+  userType     UserType    @default(REGULAR)
+  timestamp    DateTime    @default(now())
+
+  //Relations
+  createdConvos  Convo[]          @relation("UserCreatedConvos")
+  membership     ConvoMember[]
+  feedbacks      Feedback[]
+  payment        Payment[]        
+  paymentID      String?          @unique
+
+  @@index([email])
+  @@index([mobileNumber])
+}
+
+model Convo {
+  id          String         @id @default(uuid())
+  type        ConvoType
+  title       String?
+  theme       String?
+  createdBy   String
+  timestamp   DateTime       @default(now())
+  profileURL  String?
+
+  //Relations
+  creator     User           @relation("UserCreatedConvos", fields: [createdBy], references: [id], onDelete: Cascade)
+  members     ConvoMember[]
+
+  @@index([createdBy])
+}
+
+model ConvoMember {
+  convoID String
+  userID  String
+  role    MemberRole @default(MEMBER)
+
+  //Relations
+  convo   Convo @relation(fields: [convoID], references: [id], onDelete: Cascade)
+  user    User  @relation(fields: [userID], references: [id], onDelete: Cascade)
+
+  @@id([convoID, userID])
+  @@index([userID])
+}
+
+model Feedback {
+  id       String   @id @default(uuid())
+  userID   String
+  title    String
+  details  String
+  timestamp DateTime @default(now())
+
+  //Relations
+  user User @relation(fields: [userID], references: [id], onDelete: Cascade)
+
+  @@index([userID])
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  userID    String   
+  startTime DateTime?
+  endTime   DateTime?
+  timestamp DateTime @default(now())
+
+
+  user      User     @relation(fields: [userID], references: [id])
+
+  @@index([userID])
 }
