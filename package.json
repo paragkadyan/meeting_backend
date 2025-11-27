@@ -12,14 +12,17 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cassandra-driver": "^4.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "ioredis": "^5.8.2",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
-    "redis": "^5.9.0"
+    "redis": "^5.9.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@prisma/client": "^6.19.0",
@@ -28,6 +31,7 @@
     "@types/dotenv": "^6.1.1",
     "@types/express": "^5.0.5",
     "@types/ioredis": "^4.28.10",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@types/redis": "^4.0.10",
     "prisma": "^6.19.0",

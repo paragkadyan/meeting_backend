@@ -1,19 +1,20 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
-import cookieparser from "cookie-parser";
+import cookieParser from "cookie-parser";
+import { corsOptions } from './config/cors';
+import routes from './routes';
+import { errorHandler } from './middleware/error.middleware';
 
-dotenv.config();
 const app = express();
-
-app.use(cors());
-app.use(cookieparser());
 app.use(express.json());
+app.use(cookieParser());
+app.use(cors(corsOptions));
 
-const port = process.env.PORT || 3000;
-app.get("/", (req, res) => {
-  res.send(`running on port ${port || 3000}`);
-});
+app.use('/auth', routes.auth);
+app.use('/', routes.index);
+
+app.use(errorHandler);
+
 
 export default app;
 

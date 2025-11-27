@@ -2,16 +2,16 @@ import app from "./app";
 import { connectPostgres } from "./db/post";
 import { connectCassandra } from "./db/cassa";
 import { connectRedis } from "./db/redis";
+import { PORT } from './config/env';
 
-const port = process.env.PORT;
- (async () => {
-   await connectPostgres();
-   await connectCassandra();
-   await connectRedis();
+(async () => {
+  await connectPostgres();
+  await connectCassandra();
+  await connectRedis();
 
- app.listen(port, () => {
-     console.log(`Server running on port ${port}`);
- });
- })();
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+})();
 
 
