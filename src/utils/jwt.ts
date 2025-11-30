@@ -1,4 +1,4 @@
-import jwt, { Secret } from "jsonwebtoken";
+import jwt, { Secret, SignOptions, JwtPayload } from "jsonwebtoken";
 import {
     JWT_ACCESS_SECRET,
     JWT_REFRESH_SECRET,
@@ -6,48 +6,53 @@ import {
     REFRESH_TOKEN_EXPIRES_IN,
 } from "../config/env";
 
-// ---- Payload Types ----
-export interface AccessPayload {
+
+
+export interface AccessTokenPayload extends JwtPayload {
     userId: string;
 }
 
-export interface RefreshPayload {
+export interface RefreshTokenPayload extends JwtPayload {
     userId: string;
-    jti: string; // unique token id for refresh token
+    jti: string;
 }
 
-// ---- Token Signers ----
-export function signAccessToken(payload: AccessPayload): string {
+
+
+export function signAccessToken(payload: AccessTokenPayload): string {
     return jwt.sign(
         payload,
-        JWT_ACCESS_SECRET as unknown as Secret, // changed: cast to Secret
+        JWT_ACCESS_SECRET as Secret,
         {
-            expiresIn: ACCESS_TOKEN_EXPIRES_IN as unknown as jwt.SignOptions['expiresIn'], // changed: cast to expected type
+            expiresIn: ACCESS_TOKEN_EXPIRES_IN as SignOptions["expiresIn"],
         }
     );
 }
 
-export function signRefreshToken(payload: RefreshPayload): string {
+export function signRefreshToken(payload: RefreshTokenPayload): string {
     return jwt.sign(
         payload,
-        JWT_REFRESH_SECRET as unknown as Secret, // changed: cast to Secret
+        JWT_REFRESH_SECRET as Secret,
         {
-            expiresIn: REFRESH_TOKEN_EXPIRES_IN as unknown as jwt.SignOptions['expiresIn'], // changed: cast to expected type
+            expiresIn: REFRESH_TOKEN_EXPIRES_IN as SignOptions["expiresIn"],
         }
     );
 }
 
-// ---- Token Verifiers ----
-export function verifyAccessToken(token: string): AccessPayload {
-    return jwt.verify(
-        token,
-        JWT_ACCESS_SECRET as Secret
-    ) as AccessPayload;
+
+
+export function verifyAccessToken(token: string): AccessTokenPayload {
+    try {
+        return jwt.verify(token, JWT_ACCESS_SECRET as Secret) as AccessTokenPayload;
+    } catch (err) {
+        throw new Error("Invalid or expired access token");
+    }
 }
 
-export function verifyRefreshToken(token: string): RefreshPayload {
-    return jwt.verify(
-        token,
-        JWT_REFRESH_SECRET as Secret
-    ) as RefreshPayload;
+export function verifyRefreshToken(token: string): RefreshTokenPayload {
+    try {
+        return jwt.verify(token, JWT_REFRESH_SECRET as Secret) as RefreshTokenPayload;
+    } catch (err) {
+        throw new Error("Invalid or expired refresh token");
+    }
 }

@@ -37,6 +37,7 @@ model User {
   mobileNumber String?     @unique
   location     String?
   dob          DateTime?
+  refreshToken String?
   userType     UserType    @default(REGULAR)
   timestamp    DateTime    @default(now())
 
