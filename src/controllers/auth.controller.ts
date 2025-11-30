@@ -5,10 +5,8 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/
 import { registerRefreshToken, revokeRefreshToken, isRefreshTokenActive, revokeAllUserRefreshTokens } from '../services/token.service';
 import { COOKIE_DOMAIN, COOKIE_SECURE } from '../config/env';
 import { prisma } from '../utils/prismaClient';
+import { ref } from 'process';
 
-
-
-const users = new Map<string, { id: string; email: string; passwordHash: string }>();
 
 
 export async function signup(req: Request, res: Response) {
@@ -39,7 +37,8 @@ export async function signup(req: Request, res: Response) {
     const refreshToken = signRefreshToken({ userId: newUser.id, jti });
     const accessToken = signAccessToken({ userId: newUser.id });
 
-    await registerRefreshToken(newUser.id, jti);
+
+    await registerRefreshToken(newUser.id, refreshToken);
 
     res.cookie('accessToken', accessToken, {
         httpOnly: true,
@@ -88,7 +87,7 @@ export async function login(req: Request, res: Response) {
     const accessToken = signAccessToken({ userId: user.id });
     const jti = uuidv4();
     const refreshToken = signRefreshToken({ userId: user.id, jti });
-    await registerRefreshToken(user.id, jti);
+    await registerRefreshToken(user.id, refreshToken);
 
 
     // set cookies

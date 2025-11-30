@@ -1,21 +1,22 @@
+import { refresh } from '../controllers/auth.controller';
 import { redis } from '../db/redis';
 
 
 const prefix = (userId: string) => `user:${userId}:refresh_tokens`;
 
 
-export async function registerRefreshToken(userId: string, jti: string) {
-    await redis.sAdd(prefix(userId), jti);
+export async function registerRefreshToken(userId: string, refreshToken: string) {
+    await redis.sAdd(prefix(userId), refreshToken);
 }
 
 
-export async function revokeRefreshToken(userId: string, jti: string) {
-    await redis.sRem(prefix(userId), jti);
+export async function revokeRefreshToken(userId: string, refreshToken: string) {
+    await redis.sRem(prefix(userId), refreshToken);
 }
 
 
-export async function isRefreshTokenActive(userId: string, jti: string) {
-    const res = await redis.sIsMember(prefix(userId), jti);
+export async function isRefreshTokenActive(userId: string, refreshToken: string) {
+    const res = await redis.sIsMember(prefix(userId), refreshToken);
     return res === 1;
 }
 
