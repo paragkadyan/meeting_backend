@@ -3,7 +3,7 @@ import { redis } from '../db/redis';
 
 export async function generateOTP(userId: string, otp: string) {
     try {
-        await redis.set(`pwd-reset-otp:${userId}`, otp, { EX: 2 * 60 });
+        await redis.set(`pwd-reset-otp:${userId}`, otp, { EX: 3 * 60 });
     } catch (error) {
         console.error('Error registering refresh token:', error);
         throw error;
@@ -29,9 +29,9 @@ export async function clearOTP(userId: string) {
     }
 }
 
-export async function genResetToken(userId: string, resetToken: string){
+export async function genResetToken(userId: string, resetToken: string) {
     try {
-        await redis.set(`pwd-reset-token:${userId}`, resetToken, { EX: 60 });
+        await redis.set(`pwd-reset-token:${userId}`, resetToken, { EX: 3 * 60 });
     } catch (error) {
         console.error('Error generating reset token:', error);
         throw error;
