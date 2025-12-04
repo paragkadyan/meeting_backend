@@ -30,6 +30,14 @@ services:
     volumes:
       - redis_data:/data
 
+  redis-gui:
+    image: rediscommander/redis-commander:latest
+    container_name: redis_gui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin_gui
