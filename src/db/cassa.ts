@@ -1,9 +1,14 @@
 import { Client } from "cassandra-driver";
+import {
+  CASSANDRA_HOST,
+  CASSANDRA_DATACENTER,
+  CASSANDRA_KEYSPACE
+} from "../config/env";
 
 export const cassandra = new Client({
-    contactPoints: [process.env.CASSANDRA_HOST || "localhost"],
-    localDataCenter: process.env.CASSANDRA_DATACENTER || "datacenter1",
-    keyspace: process.env.CASSANDRA_KEYSPACE
+  contactPoints: [CASSANDRA_HOST || "localhost"],
+  localDataCenter: CASSANDRA_DATACENTER || "datacenter1",
+  keyspace: CASSANDRA_KEYSPACE
 
 });
 

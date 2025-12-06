@@ -17,3 +17,8 @@ export const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN;
 export const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 export const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN;
 export const COOKIE_SECURE = NODE_ENV === 'production';
+export const SMTP_HOST = process.env.SMTP_HOST;
+export const SMTP_PORT = Number(process.env.SMTP_PORT);
+export const SMTP_USER = process.env.SMTP_USER;
+export const SMTP_PASS = process.env.SMTP_PASS;
+export const FROM_EMAIL = process.env.FROM_EMAIL;

@@ -200,6 +200,15 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
   await generateOTP(user.id, otp);
 
   //waiting for smtp setup
+  await sendTemplatedEmail({
+    to: email,
+    subject: "Your OTP Code",
+    templateName: "otp.html",
+    variables: {
+      otp: otp,
+    },
+  });
+
 
   console.log("OTP for password reset:", otp);
 

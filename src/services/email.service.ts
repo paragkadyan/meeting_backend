@@ -1,5 +1,6 @@
 import { transporter } from "../config/email";
 import { renderTemplate } from "../templates/emailTemplate";
+import { FROM_EMAIL } from "../config/env";
 
 export async function sendTemplatedEmail({
     to,
@@ -16,7 +17,7 @@ export async function sendTemplatedEmail({
         const html = renderTemplate(templateName, variables);
 
         await transporter.sendMail({
-            from: process.env.FROM_EMAIL,
+            from: FROM_EMAIL,
             to,
             subject,
             html,
