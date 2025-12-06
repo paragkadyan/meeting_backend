@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import {forgotPassword, login, signup, verifyResetOtp, resetPassword} from '../controllers/auth.controller';
+import {forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout} from '../controllers/auth.controller';
 
 
 const router = Router();
@@ -7,6 +7,14 @@ const router = Router();
 
 router.route("/signup").post(
     signup
+)
+
+router.route("/verifySignupOtp").post(
+    verifySignupOTP
+)
+
+router.route("/resendSignupOtp").post(
+    resendSignupOTP
 )
 
 router.route("/login").post(
@@ -23,6 +31,22 @@ router.route("/verifyResetOtp").post(
 
 router.route("/resetPassword").post(
     resetPassword
+)
+
+router.route("/logout").post(
+    logout
+)
+
+router.route("/changePassword").put(
+    editProfile
+)
+
+router.route("/editProfile").put(
+    editProfile
+)
+
+router.route("/deleteAccount").delete(
+    deleteAccount
 )
 
 export default router;

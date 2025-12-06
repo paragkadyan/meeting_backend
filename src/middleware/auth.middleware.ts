@@ -31,8 +31,6 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
                 return res.status(401).json({ error: 'refresh revoked' });
             }
 
-
-            // rotate
             await revokeRefreshToken(userId, jti);
             const newJti = uuidv4();
             const newRefresh = signRefreshToken({ userId, jti: newJti });
