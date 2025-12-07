@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import {forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout} from '../controllers/auth.controller';
-
+import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword } from '../controllers/auth.controller';
+import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -30,23 +30,23 @@ router.route("/verifyResetOtp").post(
 )
 
 router.route("/resetPassword").post(
-    resetPassword
+    authMiddleware, resetPassword
 )
 
 router.route("/logout").post(
-    logout
+    authMiddleware, logout
 )
 
 router.route("/changePassword").put(
-    editProfile
+    authMiddleware, changePassword
 )
 
 router.route("/editProfile").put(
-    editProfile
+    authMiddleware, editProfile
 )
 
 router.route("/deleteAccount").delete(
-    deleteAccount
+    authMiddleware, deleteAccount
 )
 
 export default router;

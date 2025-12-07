@@ -36,14 +36,13 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
 
   await sendTemplatedEmail({
     to: email,
-    subject: "Welcome to Our App 🎉",
-    templateName: "welcome.html",
+    subject: "Your OTP Code",
+    templateName: "otp.html",
     variables: {
-      name: "Pika",
-      appName: "Chat App",
-      loginUrl: "https://app.dotlinker.com/login",
+      otp: otp,
     },
   });
+
   return res.status(200).json({
     message: 'Signup successful. Please verify your email.',
   });
@@ -52,7 +51,7 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
 export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) => {
   const { email, otp } = req.body;
 
-  if (!email || !otp){
+  if (!email || !otp) {
     return res.status(400).json({ error: "Email & OTP required" });
   }
 
@@ -81,6 +80,17 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
   const refreshToken = signRefreshToken({ userId: newUser.id, jti });
   const accessToken = signAccessToken({ userId: newUser.id });
 
+  await sendTemplatedEmail({
+    to: email,
+    subject: "Welcome to Our App 🎉",
+    templateName: "welcome.html",
+    variables: {
+      name: tempData.name || tempData.email,
+      appName: "Chat App",
+      loginUrl: "http://localhost:3000/login",
+    },
+  });
+
 
   await registerRefreshToken(newUser.id, refreshToken);
 
@@ -88,7 +98,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: 'lax',
-    maxAge: 15 * 60 * 1000, 
+    maxAge: 15 * 60 * 1000,
     domain: COOKIE_DOMAIN,
     path: '/',
   });
@@ -98,7 +108,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, 
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     domain: COOKIE_DOMAIN,
     path: '/auth/refresh',
   });
@@ -357,7 +367,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   if (!passwordMatch) {
     return res.status(401).json({ error: 'current password incorrect' });
   }
-  const newPasswordMatch = await bcrypt.compare(currentPassword, user.password);
+  const newPasswordMatch = await bcrypt.compare(newPassword, user.password);
   if (newPasswordMatch) {
     return res.status(400).json({ error: 'new password must be different from current password' });
   }
@@ -377,21 +387,21 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   const updateData: any = {};
 
   if (name) {
-      updateData.name = name;
+    updateData.name = name;
   }
   if (location) {
-      updateData.location = location;
+    updateData.location = location;
   }
   if (dob) {
-      updateData.dob = dob;
+    updateData.dob = dob;
   }
   if (mobileNumber) {
-      updateData.mobileNumber = mobileNumber;
+    updateData.mobileNumber = mobileNumber;
   }
 
   const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: updateData,
+    where: { id: userId },
+    data: updateData,
   });
   return res.json({ message: 'profile edited successfully', user: updatedUser });
 })
