@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import {forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout} from '../controllers/auth.controller';
+import {forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword} from '../controllers/auth.controller';
 
 
 const router = Router();
@@ -38,7 +38,7 @@ router.route("/logout").post(
 )
 
 router.route("/changePassword").put(
-    editProfile
+    changePassword
 )
 
 router.route("/editProfile").put(
