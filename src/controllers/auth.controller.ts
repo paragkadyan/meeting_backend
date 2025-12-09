@@ -9,6 +9,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { generateOTP, getOTP, genResetToken, getResetToken } from '../services/auth.service';
 import { sendTemplatedEmail } from '../services/email.service';
 import { clearSignupData, getSignupOTP, getTempSignupData, saveSignupOTP, saveTempSignupData } from '../services/tempUser.service';
+import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
 
 
 
@@ -382,7 +383,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
 
 export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
-  const { name, location, dob, mobileNumber } = req.body;
+  const { name, location, dob, mobileNumber, profileURL} = req.body;
 
   const updateData: any = {};
 
@@ -397,6 +398,9 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   }
   if (mobileNumber) {
     updateData.mobileNumber = mobileNumber;
+  }
+  if (profileURL) {
+    updateData.profileURL = profileURL;
   }
 
   const updatedUser = await prisma.user.update({
@@ -413,4 +417,23 @@ export const deleteAccount = asyncHandler(async (req: Request, res: Response) =>
   res.clearCookie('accessToken', { path: '/' });
   res.clearCookie('refreshToken', { path: '/auth/refresh' });
   return res.json({ message: 'account deleted successfully' });
+})
+
+
+export const cloudinarySignature = asyncHandler(async (req: Request, res: Response) => {
+
+  const userId = req.user?.id;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const folder = 'profile';
+  const paramstoSign = { timestamp, folder, public_id: `user_${userId}` };
+  const signature = generateSignature(paramstoSign);
+
+  const {cloudName, api_key} = getCloudinaryConfig();
+  
+  return res.json({ cloudName,
+    api_key,
+    timestamp,
+    signature,
+    folder,
+    public_id: `user_${userId}` });
 })
