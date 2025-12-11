@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature } from '../controllers/auth.controller';
+import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile } from '../controllers/auth.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -51,6 +51,10 @@ router.route("/deleteAccount").delete(
 
 router.route("/cloudinarySignature").get(
     authMiddleware, cloudinarySignature
+)
+
+router.route("/user/profile").get(
+    authMiddleware, getProfile
 )
 
 export default router;

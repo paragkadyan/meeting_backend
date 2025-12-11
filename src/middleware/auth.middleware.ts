@@ -8,9 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
     const access = req.cookies.accessToken;
     const refresh = req.cookies.refreshToken;
-
-
-    if (!access && !refresh) return res.status(401).json({ error: 'unauthorized' });
+    
+    if (!access && !refresh) return res.status(401).json({ error: 'refresh 1 unauthorized' });
 
 
     try {
@@ -18,8 +17,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         req.user = { id: payload.userId };
         return next();
     } catch (err) {
-        // access invalid/expired -> try refresh
-        if (!refresh) return res.status(401).json({ error: 'unauthorized' });
+        if (!refresh) return res.status(401).json({ error: ' refresh unauthorized' });
 
 
         try {
