@@ -6,7 +6,7 @@ import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise } from 
 import { COOKIE_DOMAIN, COOKIE_SECURE } from '../config/env';
 import { prisma } from '../utils/prismaClient';
 import { asyncHandler } from "../utils/asyncHandler";
-import { generateOTP, getOTP, genResetToken, getResetToken } from '../services/auth.service';
+import { generateOTP, getOTP, genResetToken, getResetToken, clearOTP } from '../services/auth.service';
 import { sendTemplatedEmail } from '../services/email.service';
 import { clearSignupData, getSignupOTP, getTempSignupData, saveSignupOTP, saveTempSignupData } from '../services/tempUser.service';
 import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
@@ -46,8 +46,30 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
     },
   });
 
-  const response = new apiResponse(200, {email, name}, 'Signup initiated. OTP sent to email.');
+  const response = new apiResponse(200, {user:{email, name}}, 'Signup initiated. OTP sent to email.');
 
+  return res.status(200).json(response);
+});
+
+export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = req.body;
+  if (!email) throw new apiResponse(400, null, 'Email is required');
+  const tempData = await getTempSignupData(email);
+  if (!tempData) throw new apiResponse(400, null, 'No signup session found. Please signup again.');
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  await saveSignupOTP(email, otp);
+
+  await sendTemplatedEmail({
+    to: email,
+    subject: "Welcome to Our App 🎉",
+    templateName: "welcome.html",
+    variables: {
+      name: "Pika",
+      appName: "Chat App",
+      loginUrl: "https://app.dotlinker.com/login",
+    },
+  });
+  const response = new apiResponse(200, {user:{email}}, 'OTP resent successfully.');
   return res.status(200).json(response);
 });
 
@@ -117,32 +139,10 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     path: '/',
   });
 
-  const response = new apiResponse(201, { id: newUser.id, email: newUser.email, name: newUser.name }, 'Signup successful.');
+  const response = new apiResponse(201, { user:{id: newUser.id, email: newUser.email, name: newUser.name} }, 'Signup successful.');
   return res.status(201).json(response);
 
 });;
-
-export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) => {
-  const { email } = req.body;
-  if (!email) throw new apiResponse(400, null, 'Email is required');
-  const tempData = await getTempSignupData(email);
-  if (!tempData) throw new apiResponse(400, null, 'No signup session found. Please signup again.');
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  await saveSignupOTP(email, otp);
-
-  await sendTemplatedEmail({
-    to: email,
-    subject: "Welcome to Our App 🎉",
-    templateName: "welcome.html",
-    variables: {
-      name: "Pika",
-      appName: "Chat App",
-      loginUrl: "https://app.dotlinker.com/login",
-    },
-  });
-  const response = new apiResponse(200, {email}, 'OTP resent successfully.');
-  return res.status(200).json(response);
-});
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
 
@@ -181,7 +181,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     path: '/',
   });
 
-  const response = new apiResponse(200, { id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob }, 'login successful');
+  const response = new apiResponse(200, { user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'login successful');
   return res.status(200).json(response);
 });
 
@@ -211,7 +211,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
 
   console.log("OTP for password reset:", otp);
 
-  const response = new apiResponse(200, {email: user.email}, 'OTP has been sent to your email.');
+  const response = new apiResponse(200, {user:{email: user.email}}, 'OTP has been sent to your email.');
 
   return res.status(200).json(response);
 });
@@ -231,11 +231,11 @@ export const verifyResetOtp = asyncHandler(async (req, res) => {
   if (!savedOtp || savedOtp !== otp) {
     throw new apiError(400, 'Invalid or expired OTP');
   }
-
+    await clearOTP(user.id);
   const resetToken = crypto.randomUUID();
   await genResetToken(user.id, resetToken);
 
-  const response = new apiResponse(200, {resetToken}, 'OTP verified successfully.');
+  const response = new apiResponse(200, {user:{resetToken}}, 'OTP verified successfully.');
 
   return res.status(200).json(response)
 });
@@ -263,7 +263,7 @@ export const resetPassword = asyncHandler(async (req, res) => {
     data: { password: passwordHash },
   });
 
-  await generateOTP(user.id, '');
+  await revokeAllOnCompromise(user.id);
 
   const response = new apiResponse(200, {}, 'Password reset successful.');
 
@@ -279,7 +279,7 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
 
 
   res.clearCookie('accessToken', { path: '/' });
-  res.clearCookie('refreshToken', { path: '/auth/refresh' });
+  res.clearCookie('refreshToken', { path: '/' });
 
   const response = new apiResponse(200, {}, 'Logout successful.');
   return res.json(response);
@@ -309,7 +309,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
     data: { password: newPasswordHash },
   });
   await revokeAllOnCompromise(user.id);
-  const response = new apiResponse(200, {id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob }, 'Password changed successfully.');
+  const response = new apiResponse(200, {user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'Password changed successfully.');
   return res.status(200).json(response);
 });
 
@@ -344,7 +344,7 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     data: updateData,
   });
 
-  const response = new apiResponse(200, {id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob }, 'Profile edited successfully.');
+  const response = new apiResponse(200, {user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'Profile edited successfully.');
   return res.status(200).json(response);
 });
 
@@ -353,7 +353,7 @@ export const deleteAccount = asyncHandler(async (req: Request, res: Response) =>
   await prisma.user.delete({ where: { id: userId } });
   await revokeAllOnCompromise(userId!);
   res.clearCookie('accessToken', { path: '/' });
-  res.clearCookie('refreshToken', { path: '' });
+  res.clearCookie('refreshToken', { path: '/' });
   const response = new apiResponse(200, {}, 'Account deleted successfully.');
   return res.json(response);
 });
