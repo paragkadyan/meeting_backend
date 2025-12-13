@@ -30,7 +30,7 @@ router.route("/verifyResetOtp").post(
 )
 
 router.route("/resetPassword").post(
-    authMiddleware, resetPassword
+    resetPassword
 )
 
 router.route("/logout").post(

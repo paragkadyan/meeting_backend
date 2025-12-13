@@ -1,44 +1,39 @@
 import { redis } from '../db/redis';
 
+const REFRESH_TTL = 7 * 24 * 60 * 60;
 
-const prefix = (userId: string) => `user:${userId}:refresh_tokens`;
-
-
-export async function registerRefreshToken(userId: string, refreshToken: string) {
+export async function registerRefreshToken(userId: string, jti: string) {
     try {
-        await redis.sAdd(prefix(userId), refreshToken);
+        await redis.set(`refresh:${userId}:${jti}`, "active", { EX: REFRESH_TTL });
     } catch (error) {
-        console.error('Error registering refresh token:', error);
         throw error;
     }
 }
 
 
-export async function revokeRefreshToken(userId: string, refreshToken: string) {
+export async function revokeRefreshToken(userId: string, jti: string) {
     try {
-        await redis.sRem(prefix(userId), refreshToken);
+       await redis.del(`refresh:${userId}:${jti}`);
     } catch (error) {
-        console.error('Error revoking refresh token:', error);
         throw error;
     }
 }
 
 
-export async function isRefreshTokenActive(userId: string, refreshToken: string) {
+export async function isRefreshTokenActive(userId: string, jti: string) {
     try {
-        const res = await redis.sIsMember(prefix(userId), refreshToken);
-        return res === 1;
+        const val = await redis.get(`refresh:${userId}:${jti}`);
+        return val === "active";
     } catch (error) {
-        console.error('Error checking refresh token status:', error);
         throw error;
     }
 }
 
-export async function revokeAllUserRefreshTokens(userId: string) {
+export async function revokeAllOnCompromise(userId: string) {
     try {
-        await redis.del(prefix(userId));
+        const keys = await redis.keys(`refresh:${userId}:*`);
+        if (keys.length) await redis.del(keys);
     } catch (error) {
-        console.error('Error revoking all user refresh tokens:', error);
         throw error;
     }
 }

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
-import { registerRefreshToken, revokeRefreshToken, isRefreshTokenActive, revokeAllUserRefreshTokens } from '../services/token.service';
+import { registerRefreshToken, revokeRefreshToken, isRefreshTokenActive, revokeAllOnCompromise } from '../services/token.service';
 import { COOKIE_DOMAIN, COOKIE_SECURE } from '../config/env';
 import { prisma } from '../utils/prismaClient';
 import { asyncHandler } from "../utils/asyncHandler";
@@ -93,7 +93,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
   });
 
 
-  await registerRefreshToken(newUser.id, refreshToken);
+  await registerRefreshToken(newUser.id, jti);
 
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
@@ -111,7 +111,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
     domain: COOKIE_DOMAIN,
-    path: '/auth/refresh',
+    path: '/',
   });
 
 
@@ -146,7 +146,6 @@ export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) 
   });
 })
 
-
 export const login = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, password } = req.body;
@@ -159,14 +158,12 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   if (!ok) return res.status(401).json({ error: 'invalid credentials' });
 
 
-  // create tokens
   const accessToken = signAccessToken({ userId: user.id });
   const jti = uuidv4();
   const refreshToken = signRefreshToken({ userId: user.id, jti });
-  await registerRefreshToken(user.id, refreshToken);
+  await registerRefreshToken(user.id, jti);
 
 
-  // set cookies
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
@@ -183,7 +180,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     domain: COOKIE_DOMAIN,
-    path: '/auth/refresh',
+    path: '/',
   });
 
 
@@ -282,61 +279,6 @@ export const resetPassword = asyncHandler(async (req, res) => {
   return res.status(200).json({ message: "Password reset successful" });
 })
 
-export const refresh = asyncHandler(async (req: Request, res: Response) => {
-  const token = req.cookies.refreshToken;
-  if (!token) return res.status(401).json({ error: 'no refresh token' });
-
-
-  try {
-    const payload = verifyRefreshToken(token);
-    const userId = payload.userId;
-    const jti = payload.jti;
-    if (!userId || !jti) return res.status(401).json({ error: 'invalid token payload' });
-
-
-    if (!await isRefreshTokenActive(userId, jti)) {
-      // possible reuse/compromise - revoke all
-      // await revokeAllUserRefreshTokens(userId); //issue created for multiple device login
-      return res.status(401).json({ error: 'refresh token revoked' });
-    }
-
-
-    // rotate
-    await revokeRefreshToken(userId, jti);
-    const newJti = uuidv4();
-    const newRefreshToken = signRefreshToken({ userId, jti: newJti });
-    await registerRefreshToken(userId, newJti);
-
-
-    const newAccessToken = signAccessToken({ userId });
-
-    // set cookies
-    res.cookie('accessToken', newAccessToken, {
-      httpOnly: true,
-      secure: COOKIE_SECURE,
-      sameSite: 'lax',
-      maxAge: 15 * 60 * 1000,
-      domain: COOKIE_DOMAIN,
-      path: '/',
-    });
-
-
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: COOKIE_SECURE,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      domain: COOKIE_DOMAIN,
-      path: '/auth/refresh',
-    });
-
-
-    return res.json({ ok: true });
-  } catch (err) {
-    return res.status(401).json({ error: 'invalid refresh token' });
-  }
-})
-
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   const token = req.cookies.refreshToken;
   if (token) {
@@ -377,7 +319,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
     where: { id: userId },
     data: { password: newPasswordHash },
   });
-  await revokeAllUserRefreshTokens(user.id);
+  await revokeAllOnCompromise(user.id);
   return res.json({ message: 'password changed successfully' });
 })
 
@@ -413,7 +355,7 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
 export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
   await prisma.user.delete({ where: { id: userId } });
-  await revokeAllUserRefreshTokens(userId!);
+  await revokeAllOnCompromise(userId!);
   res.clearCookie('accessToken', { path: '/' });
   res.clearCookie('refreshToken', { path: '/auth/refresh' });
   return res.json({ message: 'account deleted successfully' });
