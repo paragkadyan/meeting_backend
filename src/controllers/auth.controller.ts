@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
-import { registerRefreshToken, revokeRefreshToken, isRefreshTokenActive, revokeAllOnCompromise } from '../services/token.service';
+import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise } from '../services/token.service';
 import { COOKIE_DOMAIN, COOKIE_SECURE } from '../config/env';
 import { prisma } from '../utils/prismaClient';
 import { asyncHandler } from "../utils/asyncHandler";
@@ -10,6 +10,8 @@ import { generateOTP, getOTP, genResetToken, getResetToken } from '../services/a
 import { sendTemplatedEmail } from '../services/email.service';
 import { clearSignupData, getSignupOTP, getTempSignupData, saveSignupOTP, saveTempSignupData } from '../services/tempUser.service';
 import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
+import { apiResponse } from '../utils/apiResponse';
+import { apiError } from '../utils/apiError';
 
 
 
@@ -18,7 +20,7 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
 
 
   if (!email || !password || !name)
-    return res.status(400).json({ error: 'email + password required' });
+    throw new apiError(400, 'Name, email and password are required.');
 
 
   const existingUser = await prisma.user.findUnique({
@@ -26,7 +28,7 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
   });
 
   if (existingUser) {
-    return res.status(409).json({ error: 'Email already exists' });
+    throw new apiError(409, 'Email already in use.');
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -44,28 +46,29 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
     },
   });
 
-  return res.status(200).json({
-    message: 'Signup successful. Please verify your email.',
-  });
-})
+  const response = new apiResponse(200, {email, name}, 'Signup initiated. OTP sent to email.');
+
+  return res.status(200).json(response);
+});
 
 export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) => {
   const { email, otp } = req.body;
 
   if (!email || !otp) {
-    return res.status(400).json({ error: "Email & OTP required" });
+    throw new apiError(400, 'Email and OTP are required');
   }
 
   const savedOtp = await getSignupOTP(email);
 
   if (!savedOtp || savedOtp !== otp) {
-    return res.status(400).json({ error: "Invalid or expired OTP" });
+    throw new apiError(400, 'Invalid or expired OTP');
   }
 
   const tempData = await getTempSignupData(email);
 
-  if (!tempData)
-    return res.status(400).json({ error: "Session expired. Signup again." });
+  if (!tempData){
+    throw new apiError(400, 'Session expired. Signup again.');
+  }
 
   const newUser = await prisma.user.create({
     data: {
@@ -114,20 +117,16 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     path: '/',
   });
 
+  const response = new apiResponse(201, { id: newUser.id, email: newUser.email, name: newUser.name }, 'Signup successful.');
+  return res.status(201).json(response);
 
-  return res.status(201).json({
-    id: newUser.id,
-    email: newUser.email,
-  });
-
-})
+});;
 
 export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'email required' });
+  if (!email) throw new apiResponse(400, null, 'Email is required');
   const tempData = await getTempSignupData(email);
-  if (!tempData)
-    return res.status(400).json({ error: "Session expired. Signup again." });
+  if (!tempData) throw new apiResponse(400, null, 'No signup session found. Please signup again.');
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   await saveSignupOTP(email, otp);
 
@@ -141,21 +140,20 @@ export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) 
       loginUrl: "https://app.dotlinker.com/login",
     },
   });
-  return res.status(200).json({
-    message: 'OTP resent successfully.',
-  });
-})
+  const response = new apiResponse(200, {email}, 'OTP resent successfully.');
+  return res.status(200).json(response);
+});
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
 
   const { email, password } = req.body;
 
-  if (!email || !password) return res.status(400).json({ error: 'email + password required' });
+  if (!email || !password) throw new apiResponse(400, null, 'email and password required');
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) return res.status(401).json({ error: 'invalid credentials' });
+  if (!user) throw new apiError(401, 'invalid credentials');
   const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.status(401).json({ error: 'invalid credentials' });
+  if (!ok) throw new apiError(401, 'invalid credentials');
 
 
   const accessToken = signAccessToken({ userId: user.id });
@@ -183,31 +181,24 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     path: '/',
   });
 
-
-  return res.status(200).json({
-    id: user.id,
-    email: user.email,
-    message: 'login successful',
-  });
-})
+  const response = new apiResponse(200, { id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob }, 'login successful');
+  return res.status(200).json(response);
+});
 
 export const forgotPassword = asyncHandler(async (req: Request, res: Response) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'email required' });
+  if (!email) throw new apiError(400, 'Email is required');
 
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
-    return res.status(409).json({
-      message: "Email doesn't exists.",
-    });
+    throw new apiError(400, 'If the email is registered, an OTP has been sent.');
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
   await generateOTP(user.id, otp);
 
-  //waiting for smtp setup
   await sendTemplatedEmail({
     to: email,
     subject: "Your OTP Code",
@@ -220,51 +211,49 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
 
   console.log("OTP for password reset:", otp);
 
-  return res.status(200).json({
-    email: user.email,
-    message: "OTP has been sent to your email.",
-  });
-})
+  const response = new apiResponse(200, {email: user.email}, 'OTP has been sent to your email.');
+
+  return res.status(200).json(response);
+});
 
 export const verifyResetOtp = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
 
   if (!email || !otp) {
-    return res.status(400).json({ error: "Email + OTP required" });
+    throw new apiError(400, 'Email and OTP are required');
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) return res.status(400).json({ error: "Invalid OTP" });
+  if (!user) throw new apiError(400, 'Invalid request');
 
   const savedOtp = await getOTP(user.id);
 
   if (!savedOtp || savedOtp !== otp) {
-    return res.status(400).json({ error: "Invalid or expired OTP" });
+    throw new apiError(400, 'Invalid or expired OTP');
   }
 
   const resetToken = crypto.randomUUID();
   await genResetToken(user.id, resetToken);
 
-  return res.status(200).json({
-    resetToken,
-    message: "OTP verified successfully",
-  })
-})
+  const response = new apiResponse(200, {resetToken}, 'OTP verified successfully.');
+
+  return res.status(200).json(response)
+});
 
 export const resetPassword = asyncHandler(async (req, res) => {
   const { email, newPassword, resetToken } = req.body ?? {};
 
   if (!email || !newPassword || !resetToken) {
-    return res.status(400).json({ error: "Email + new password required" });
+    throw new apiError(400, 'Email, new password and reset token are required');
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) return res.status(400).json({ error: "Invalid request" });
+  if (!user) throw new apiError(400, "Invalid request")
 
   const savedResetToken = await getResetToken(user.id);
 
   if (!savedResetToken || savedResetToken !== resetToken) {
-    return res.status(400).json({ error: "Invalid or expired reset token" });
+    throw new apiError(400, "Invalid or expired reset token")
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
@@ -276,43 +265,43 @@ export const resetPassword = asyncHandler(async (req, res) => {
 
   await generateOTP(user.id, '');
 
-  return res.status(200).json({ message: "Password reset successful" });
-})
+  const response = new apiResponse(200, {}, 'Password reset successful.');
+
+  return res.status(200).json(response);
+});
 
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   const token = req.cookies.refreshToken;
   if (token) {
-    try {
       const payload = verifyRefreshToken(token);
       if (payload.userId && payload.jti) await revokeRefreshToken(payload.userId, payload.jti);
-    } catch (e) {
-      console.error('Error during logout token verification:', e);
-    }
   }
 
 
   res.clearCookie('accessToken', { path: '/' });
   res.clearCookie('refreshToken', { path: '/auth/refresh' });
-  return res.json({ ok: true });
-})
+
+  const response = new apiResponse(200, {}, 'Logout successful.');
+  return res.json(response);
+});
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
   const { currentPassword, newPassword } = req.body;
   if (!currentPassword || !newPassword) {
-    return res.status(400).json({ error: 'current and new password required' });
+    throw new apiError(400, 'current password and new password are required');
   }
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
-    return res.status(404).json({ error: 'user not found' });
+    throw new apiError(404, 'User not found');
   }
   const passwordMatch = await bcrypt.compare(currentPassword, user.password);
   if (!passwordMatch) {
-    return res.status(401).json({ error: 'current password incorrect' });
+    throw new apiError(401, 'Current password is incorrect');
   }
   const newPasswordMatch = await bcrypt.compare(newPassword, user.password);
   if (newPasswordMatch) {
-    return res.status(400).json({ error: 'new password must be different from current password' });
+    throw new apiError(400, 'New password must be different from the current password');
   }
   const newPasswordHash = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({
@@ -320,8 +309,9 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
     data: { password: newPasswordHash },
   });
   await revokeAllOnCompromise(user.id);
-  return res.json({ message: 'password changed successfully' });
-})
+  const response = new apiResponse(200, {id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob }, 'Password changed successfully.');
+  return res.status(200).json(response);
+});
 
 export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
@@ -345,22 +335,28 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     updateData.profileURL = profileURL;
   }
 
-  const updatedUser = await prisma.user.update({
+  if (Object.keys(updateData).length === 0) {
+    throw new apiError(400, 'No data provided for update.');
+  }
+
+  const user = await prisma.user.update({
     where: { id: userId },
     data: updateData,
   });
-  return res.json({ message: 'profile edited successfully', user: updatedUser });
-})
+
+  const response = new apiResponse(200, {id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob }, 'Profile edited successfully.');
+  return res.status(200).json(response);
+});
 
 export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
   await prisma.user.delete({ where: { id: userId } });
   await revokeAllOnCompromise(userId!);
   res.clearCookie('accessToken', { path: '/' });
-  res.clearCookie('refreshToken', { path: '/auth/refresh' });
-  return res.json({ message: 'account deleted successfully' });
-})
-
+  res.clearCookie('refreshToken', { path: '' });
+  const response = new apiResponse(200, {}, 'Account deleted successfully.');
+  return res.json(response);
+});
 
 export const cloudinarySignature = asyncHandler(async (req: Request, res: Response) => {
 
@@ -369,16 +365,10 @@ export const cloudinarySignature = asyncHandler(async (req: Request, res: Respon
   const folder = 'profile';
   const paramstoSign = { timestamp, folder, public_id: `user_${userId}` };
   const signature = generateSignature(paramstoSign);
-
   const {cloudName, api_key} = getCloudinaryConfig();
-  
-  return res.json({ cloudName,
-    api_key,
-    timestamp,
-    signature,
-    folder,
-    public_id: `user_${userId}` });
-})
+  const response = new apiResponse(200, { user:{id:userId}, cloudinaryData:{cloudName, api_key, timestamp, signature, folder, public_id: `user_${userId}`} }, 'Cloudinary signature generated successfully.');
+  return res.json(response)
+});
 
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
@@ -389,10 +379,14 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
       name: true,
       email: true,
       location: true,
-      dob: true,}
+      dob: true,
+      mobileNumber: true,
+      profileURL: true,
+    },
     });
   if (!user) {
-    return res.status(404).json({ error: 'user not found' });
+    throw new apiError(404, 'User not found');
   }
-  return res.json({ user });
+  const response = new apiResponse(200, { user }, 'User profile fetched successfully.');
+  return res.status(200).json(response);
 });

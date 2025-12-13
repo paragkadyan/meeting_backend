@@ -2,6 +2,7 @@ import { transporter } from "../config/email";
 import { renderTemplate } from "../templates/emailTemplate";
 import { FROM_EMAIL } from "../config/env";
 import path from "path";
+import { apiError } from "../utils/apiError";
 
 export async function sendTemplatedEmail({
     to,
@@ -34,10 +35,7 @@ export async function sendTemplatedEmail({
                 },
             ],
         });
-
-        console.log(`📧 Email sent to ${to}`);
     } catch (err) {
-        console.error("❌ Email send failed:", err);
-        throw new Error("Email sending failed");
+        throw new apiError(500, 'Failed to send email');
     }
 }
