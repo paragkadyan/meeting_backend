@@ -25,21 +25,30 @@ enum MemberRole {
   ADMIN
 }
 
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+}
+
 
 
 
 model User {
   id           String      @id @default(uuid())
   email        String      @unique
-  password     String
+  password     String?
   name         String?
   profileURL   String?
   mobileNumber String?     @unique
+  googleId     String?     @unique
   location     String?
   dob          DateTime?
   refreshToken String?
+  authProvider AuthProvider @default(LOCAL)
   userType     UserType    @default(REGULAR)
   timestamp    DateTime    @default(now())
+
+  
 
   //Relations
   createdConvos  Convo[]          @relation("UserCreatedConvos")
