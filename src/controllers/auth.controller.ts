@@ -12,6 +12,7 @@ import { clearSignupData, getSignupOTP, getTempSignupData, saveSignupOTP, saveTe
 import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
 import { apiResponse } from '../utils/apiResponse';
 import { apiError } from '../utils/apiError';
+import { verifyGoogleToken } from '../utils/googleAuth';
 
 
 
@@ -150,6 +151,9 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
 
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) throw new apiError(401, 'invalid credentials');
+  if (!user.password) {
+    throw new apiError(400, `Please login using ${user.authProvider}`);
+  }
   const ok = await bcrypt.compare(password, user.password);
   if (!ok) throw new apiError(401, 'invalid credentials');
 
@@ -293,6 +297,9 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   if (!user) {
     throw new apiError(404, 'User not found');
   }
+  if (!user.password) {
+    throw new apiError(400, `Please login using ${user.authProvider}`);
+  }
   const passwordMatch = await bcrypt.compare(currentPassword, user.password);
   if (!passwordMatch) {
     throw new apiError(401, 'Current password is incorrect');
@@ -388,3 +395,55 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
   const response = new apiResponse(200, { user }, 'User profile fetched successfully.');
   return res.status(200).json(response);
 });
+
+export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+     throw new apiError(400, "ID token is required");
+    }
+
+    const googleUser = await verifyGoogleToken(idToken);
+
+    let user = await prisma.user.findUnique({
+      where: { email: googleUser.email },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email: googleUser.email,
+          name: googleUser.name,
+          googleId: googleUser.googleId,
+          profileURL: googleUser.picture,
+          authProvider: "GOOGLE",
+        },
+      });
+    }
+
+    if (user.authProvider !== "GOOGLE") {
+      throw new apiError(400, `Please login using ${user.authProvider}`);
+    }
+
+    const jti = uuidv4();
+    const accessToken = signAccessToken({ userId: user.id });
+    const refreshToken = signRefreshToken({ userId: user.id, jti});
+
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
+    const response = new apiResponse(200, { user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'Login with Google successful.');
+    return res.status(200).json(response);
+  }
+);

@@ -22,3 +22,7 @@ export const SMTP_PORT = Number(process.env.SMTP_PORT);
 export const SMTP_USER = process.env.SMTP_USER;
 export const SMTP_PASS = process.env.SMTP_PASS;
 export const FROM_EMAIL = process.env.FROM_EMAIL;
+export const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
+export const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
+export const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
+export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
