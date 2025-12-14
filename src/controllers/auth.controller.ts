@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise } from '../services/token.service';
-import { COOKIE_DOMAIN, COOKIE_SECURE } from '../config/env';
+import { COOKIE_DOMAIN, COOKIE_SECURE, FRONTEND_ORIGIN } from '../config/env';
 import { prisma } from '../utils/prismaClient';
 import { asyncHandler } from "../utils/asyncHandler";
 import { generateOTP, getOTP, genResetToken, getResetToken, clearOTP } from '../services/auth.service';
@@ -39,14 +39,14 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
 
   await sendTemplatedEmail({
     to: email,
-    subject: "Your OTP Code",
+    subject: "Your Signup OTP Code",
     templateName: "otp.html",
     variables: {
       otp: otp,
     },
   });
 
-  const response = new apiResponse(200, {user:{email, name}}, 'Signup initiated. OTP sent to email.');
+  const response = new apiResponse(200, { user: { email, name } }, 'Signup initiated. OTP sent to email.');
 
   return res.status(200).json(response);
 });
@@ -61,15 +61,13 @@ export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) 
 
   await sendTemplatedEmail({
     to: email,
-    subject: "Welcome to Our App 🎉",
-    templateName: "welcome.html",
+    subject: "Your Resent Signup OTP Code",
+    templateName: "otp.html",
     variables: {
-      name: "Pika",
-      appName: "Chat App",
-      loginUrl: "https://app.dotlinker.com/login",
+      otp: otp,
     },
   });
-  const response = new apiResponse(200, {user:{email}}, 'OTP resent successfully.');
+  const response = new apiResponse(200, { user: { email } }, 'OTP resent successfully.');
   return res.status(200).json(response);
 });
 
@@ -88,7 +86,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
 
   const tempData = await getTempSignupData(email);
 
-  if (!tempData){
+  if (!tempData) {
     throw new apiError(400, 'Session expired. Signup again.');
   }
 
@@ -112,8 +110,8 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     templateName: "welcome.html",
     variables: {
       name: tempData.name || tempData.email,
-      appName: "Chat App",
-      loginUrl: "http://localhost:3000/login",
+      appName: "Heyllow",
+      loginUrl: FRONTEND_ORIGIN as string,
     },
   });
 
@@ -139,7 +137,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     path: '/',
   });
 
-  const response = new apiResponse(201, { user:{id: newUser.id, email: newUser.email, name: newUser.name} }, 'Signup successful.');
+  const response = new apiResponse(201, { user: { id: newUser.id, email: newUser.email, name: newUser.name } }, 'Signup successful.');
   return res.status(201).json(response);
 
 });;
@@ -181,7 +179,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     path: '/',
   });
 
-  const response = new apiResponse(200, { user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'login successful');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'login successful');
   return res.status(200).json(response);
 });
 
@@ -201,7 +199,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
 
   await sendTemplatedEmail({
     to: email,
-    subject: "Your OTP Code",
+    subject: "Your Reset OTP Code",
     templateName: "otp.html",
     variables: {
       otp: otp,
@@ -211,7 +209,7 @@ export const forgotPassword = asyncHandler(async (req: Request, res: Response) =
 
   console.log("OTP for password reset:", otp);
 
-  const response = new apiResponse(200, {user:{email: user.email}}, 'OTP has been sent to your email.');
+  const response = new apiResponse(200, { user: { email: user.email } }, 'OTP has been sent to your email.');
 
   return res.status(200).json(response);
 });
@@ -231,11 +229,11 @@ export const verifyResetOtp = asyncHandler(async (req, res) => {
   if (!savedOtp || savedOtp !== otp) {
     throw new apiError(400, 'Invalid or expired OTP');
   }
-    await clearOTP(user.id);
+  await clearOTP(user.id);
   const resetToken = crypto.randomUUID();
   await genResetToken(user.id, resetToken);
 
-  const response = new apiResponse(200, {user:{resetToken}}, 'OTP verified successfully.');
+  const response = new apiResponse(200, { user: { resetToken } }, 'OTP verified successfully.');
 
   return res.status(200).json(response)
 });
@@ -273,8 +271,8 @@ export const resetPassword = asyncHandler(async (req, res) => {
 export const logout = asyncHandler(async (req: Request, res: Response) => {
   const token = req.cookies.refreshToken;
   if (token) {
-      const payload = verifyRefreshToken(token);
-      if (payload.userId && payload.jti) await revokeRefreshToken(payload.userId, payload.jti);
+    const payload = verifyRefreshToken(token);
+    if (payload.userId && payload.jti) await revokeRefreshToken(payload.userId, payload.jti);
   }
 
 
@@ -309,13 +307,13 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
     data: { password: newPasswordHash },
   });
   await revokeAllOnCompromise(user.id);
-  const response = new apiResponse(200, {user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'Password changed successfully.');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Password changed successfully.');
   return res.status(200).json(response);
 });
 
 export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
-  const { name, location, dob, mobileNumber, profileURL} = req.body;
+  const { name, location, dob, mobileNumber, profileURL } = req.body;
 
   const updateData: any = {};
 
@@ -344,7 +342,7 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     data: updateData,
   });
 
-  const response = new apiResponse(200, {user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'Profile edited successfully.');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Profile edited successfully.');
   return res.status(200).json(response);
 });
 
@@ -365,8 +363,8 @@ export const cloudinarySignature = asyncHandler(async (req: Request, res: Respon
   const folder = 'profile';
   const paramstoSign = { timestamp, folder, public_id: `user_${userId}` };
   const signature = generateSignature(paramstoSign);
-  const {cloudName, api_key} = getCloudinaryConfig();
-  const response = new apiResponse(200, { user:{id:userId}, cloudinaryData:{cloudName, api_key, timestamp, signature, folder, public_id: `user_${userId}`} }, 'Cloudinary signature generated successfully.');
+  const { cloudName, api_key } = getCloudinaryConfig();
+  const response = new apiResponse(200, { user: { id: userId }, cloudinaryData: { cloudName, api_key, timestamp, signature, folder, public_id: `user_${userId}` } }, 'Cloudinary signature generated successfully.');
   return res.json(response)
 });
 
@@ -383,7 +381,7 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
       mobileNumber: true,
       profileURL: true,
     },
-    });
+  });
   if (!user) {
     throw new apiError(404, 'User not found');
   }
