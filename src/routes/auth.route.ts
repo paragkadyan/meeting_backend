@@ -57,8 +57,12 @@ router.route("/user/profile").get(
     authMiddleware, getProfile
 )
 
-router.route("/auth/google").post(
+router.route("/google").post(
     loginWithGoogle
 )
+
+router.route('/me').get(
+    authMiddleware, getProfile
+);
 
 export default router;

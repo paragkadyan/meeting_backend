@@ -7,43 +7,43 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { apiError } from '../utils/apiError';
 
 
-export const authMiddleware = asyncHandler(async(req: Request, res: Response, next: NextFunction) => {
-    const access = req.cookies.accessToken;
-    const refresh = req.cookies.refreshToken;
-    
-    if (!access && !refresh){
-        throw new apiError(401, 'unauthorized');
-    }
-    if (access) {
-        try {
-            const payload = verifyAccessToken(access);
-            req.user = { id: payload.userId };
-            return next(); 
-        } catch {
-            
-        }
-    }
+export const authMiddleware = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const access = req.cookies.accessToken;
+  const refresh = req.cookies.refreshToken;
 
-    if (!refresh) throw new apiError(401, 'unauthorized');
-
+  if (!access && !refresh) {
+    throw new apiError(401, 'unauthorized');
+  }
+  if (access) {
     try {
+      const payload = verifyAccessToken(access);
+      req.user = { id: payload.userId };
+      return next();
+    } catch {
+
+    }
+  }
+
+  if (!refresh) throw new apiError(401, 'unauthorized');
+
+  try {
     const payload = verifyRefreshToken(refresh);
     const active = await isRefreshTokenActive(payload.userId, payload.jti);
     if (!active) {
-        res.clearCookie("accessToken", {
-            httpOnly: true,
-            secure: COOKIE_SECURE,
-            sameSite: "lax",
-            domain: COOKIE_DOMAIN,
-            path: "/",
-        });
-        res.clearCookie("refreshToken", {
-            httpOnly: true,
-            secure: COOKIE_SECURE,
-            sameSite: "lax",
-            domain: COOKIE_DOMAIN,
-            path: "/",
-        });
+      res.clearCookie("accessToken", {
+        httpOnly: true,
+        secure: COOKIE_SECURE,
+        sameSite: "lax",
+        domain: COOKIE_DOMAIN,
+        path: "/",
+      });
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: COOKIE_SECURE,
+        sameSite: "lax",
+        domain: COOKIE_DOMAIN,
+        path: "/",
+      });
       throw new apiError(401, "refresh revoked");
     }
 
@@ -56,7 +56,7 @@ export const authMiddleware = asyncHandler(async(req: Request, res: Response, ne
     res.cookie("accessToken", newAccess, {
       httpOnly: true,
       secure: COOKIE_SECURE,
-      sameSite: "lax",
+      sameSite: "none",
       maxAge: 15 * 60 * 1000,
       domain: COOKIE_DOMAIN,
       path: "/",
@@ -64,7 +64,7 @@ export const authMiddleware = asyncHandler(async(req: Request, res: Response, ne
     res.cookie("refreshToken", newRefresh, {
       httpOnly: true,
       secure: COOKIE_SECURE,
-      sameSite: "lax",
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
       domain: COOKIE_DOMAIN,
       path: "/",
