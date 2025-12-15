@@ -122,7 +122,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
-    sameSite: 'lax',
+    sameSite: 'none',
     maxAge: 15 * 60 * 1000,
     domain: COOKIE_DOMAIN,
     path: '/',
@@ -132,7 +132,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
-    sameSite: 'lax',
+    sameSite: 'none',
     maxAge: 7 * 24 * 60 * 60 * 1000,
     domain: COOKIE_DOMAIN,
     path: '/',
@@ -167,7 +167,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
-    sameSite: 'lax',
+    sameSite: 'none',
     maxAge: 15 * 60 * 1000, // 15 min
     domain: COOKIE_DOMAIN,
     path: '/',
@@ -177,7 +177,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
-    sameSite: 'lax',
+    sameSite: 'none',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     domain: COOKIE_DOMAIN,
     path: '/',
@@ -397,53 +397,53 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) => {
-    const { idToken } = req.body;
+  const { idToken } = req.body;
 
-    if (!idToken) {
-     throw new apiError(400, "ID token is required");
-    }
-
-    const googleUser = await verifyGoogleToken(idToken);
-
-    let user = await prisma.user.findUnique({
-      where: { email: googleUser.email },
-    });
-
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email: googleUser.email,
-          name: googleUser.name,
-          googleId: googleUser.googleId,
-          profileURL: googleUser.picture,
-          authProvider: "GOOGLE",
-        },
-      });
-    }
-
-    if (user.authProvider !== "GOOGLE") {
-      throw new apiError(400, `Please login using ${user.authProvider}`);
-    }
-
-    const jti = uuidv4();
-    const accessToken = signAccessToken({ userId: user.id });
-    const refreshToken = signRefreshToken({ userId: user.id, jti});
-
-    res.cookie("accessToken", accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      maxAge: 15 * 60 * 1000,
-    });
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      path: "/",
-    });
-    const response = new apiResponse(200, { user:{id: user.id, email: user.email, name:user.name, profilePhoto:user.profileURL, phNumber:user.mobileNumber, dob: user.dob} }, 'Login with Google successful.');
-    return res.status(200).json(response);
+  if (!idToken) {
+    throw new apiError(400, "ID token is required");
   }
+
+  const googleUser = await verifyGoogleToken(idToken);
+
+  let user = await prisma.user.findUnique({
+    where: { email: googleUser.email },
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        email: googleUser.email,
+        name: googleUser.name,
+        googleId: googleUser.googleId,
+        profileURL: googleUser.picture,
+        authProvider: "GOOGLE",
+      },
+    });
+  }
+
+  if (user.authProvider !== "GOOGLE") {
+    throw new apiError(400, `Please login using ${user.authProvider}`);
+  }
+
+  const jti = uuidv4();
+  const accessToken = signAccessToken({ userId: user.id });
+  const refreshToken = signRefreshToken({ userId: user.id, jti });
+
+  res.cookie("accessToken", accessToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    maxAge: 15 * 60 * 1000,
+  });
+
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/",
+  });
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Login with Google successful.');
+  return res.status(200).json(response);
+}
 );
