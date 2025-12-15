@@ -32,3 +32,5 @@ cassandra_data/
 /src/generated/prisma
 
 /src/generated/prisma
+
+/generated/prisma
