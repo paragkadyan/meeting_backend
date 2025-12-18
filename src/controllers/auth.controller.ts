@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise } from '../services/token.service';
 import { COOKIE_DOMAIN, COOKIE_SECURE, FRONTEND_ORIGIN } from '../config/env';
-import { prisma } from '../utils/prismaClient';
+import { prisma } from '../db/post';
 import { asyncHandler } from "../utils/asyncHandler";
 import { generateOTP, getOTP, genResetToken, getResetToken, clearOTP } from '../services/auth.service';
 import { sendTemplatedEmail } from '../services/email.service';
@@ -13,6 +13,7 @@ import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
 import { apiResponse } from '../utils/apiResponse';
 import { apiError } from '../utils/apiError';
 import { verifyGoogleToken } from '../utils/googleAuth';
+import { log } from 'console';
 
 
 
@@ -37,6 +38,7 @@ export const signup = asyncHandler(async (req: Request, res: Response) => {
   await saveTempSignupData(email, { name, email, passwordHash });
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   await saveSignupOTP(email, otp);
+  console.log("Signup OTP:", otp);
 
   await sendTemplatedEmail({
     to: email,
@@ -59,7 +61,7 @@ export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) 
   if (!tempData) throw new apiResponse(400, null, 'No signup session found. Please signup again.');
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   await saveSignupOTP(email, otp);
-
+  console.log("Resent Signup OTP:", otp);
   await sendTemplatedEmail({
     to: email,
     subject: "Your Resent Signup OTP Code",
@@ -68,6 +70,7 @@ export const resendSignupOTP = asyncHandler(async (req: Request, res: Response) 
       otp: otp,
     },
   });
+
   const response = new apiResponse(200, { user: { email } }, 'OTP resent successfully.');
   return res.status(200).json(response);
 });
