@@ -124,7 +124,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     secure: COOKIE_SECURE,
     sameSite: 'none',
     maxAge: 15 * 60 * 1000,
-    domain: COOKIE_DOMAIN,
+    // domain: COOKIE_DOMAIN,
     path: '/',
   });
 
@@ -134,7 +134,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     secure: COOKIE_SECURE,
     sameSite: 'none',
     maxAge: 7 * 24 * 60 * 60 * 1000,
-    domain: COOKIE_DOMAIN,
+    // domain: COOKIE_DOMAIN,
     path: '/',
   });
 
@@ -169,7 +169,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     secure: COOKIE_SECURE,
     sameSite: 'none',
     maxAge: 15 * 60 * 1000, // 15 min
-    domain: COOKIE_DOMAIN,
+    // domain: COOKIE_DOMAIN,
     path: '/',
   });
 
@@ -179,7 +179,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     secure: COOKIE_SECURE,
     sameSite: 'none',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    domain: COOKIE_DOMAIN,
+    // domain: COOKIE_DOMAIN,
     path: '/',
   });
 

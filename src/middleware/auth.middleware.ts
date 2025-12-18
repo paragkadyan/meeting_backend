@@ -33,15 +33,15 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
       res.clearCookie("accessToken", {
         httpOnly: true,
         secure: COOKIE_SECURE,
-        sameSite: "lax",
-        domain: COOKIE_DOMAIN,
+        sameSite: "none",
+        // domain: COOKIE_DOMAIN,
         path: "/",
       });
       res.clearCookie("refreshToken", {
         httpOnly: true,
         secure: COOKIE_SECURE,
-        sameSite: "lax",
-        domain: COOKIE_DOMAIN,
+        sameSite: "none",
+        // domain: COOKIE_DOMAIN,
         path: "/",
       });
       throw new apiError(401, "refresh revoked");
@@ -58,7 +58,7 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
       secure: COOKIE_SECURE,
       sameSite: "none",
       maxAge: 15 * 60 * 1000,
-      domain: COOKIE_DOMAIN,
+      // domain: COOKIE_DOMAIN,
       path: "/",
     });
     res.cookie("refreshToken", newRefresh, {
@@ -66,7 +66,7 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
       secure: COOKIE_SECURE,
       sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
-      domain: COOKIE_DOMAIN,
+      // domain: COOKIE_DOMAIN,
       path: "/",
     });
 
