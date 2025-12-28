@@ -1,0 +1,83 @@
+CREATE TABLE messages (
+  convoID UUID,
+  bucket INT,                    -- Daily bucket (0,1,2...) to prevent hot partitions
+  messageID TIMEUUID,
+  senderID UUID,
+  content TEXT,
+  messageType TEXT,               -- 'text', 'image', 'video', 'system'
+  attachments LIST<TEXT>,         -- ['https://...jpg', 'https://...mp4']
+  isEdited BOOLEAN,
+  editedAt TIMESTAMP,
+  isDeleted BOOLEAN,
+  deletedAt TIMESTAMP,
+  replyToMessageID TIMEUUID,      -- Threaded replies
+  createdAt TIMESTAMP,
+  PRIMARY KEY ((convoID, bucket), messageID)
+) WITH CLUSTERING ORDER BY (messageID DESC)
+  AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+  AND compaction = {
+    'class': 'TimeWindowCompactionStrategy',
+    'compaction_window_size': 1,
+    'compaction_window_unit': 'DAYS'
+  }
+  AND gc_grace_seconds = 86400;
+
+
+
+
+CREATE TABLE conversations (
+  convoID UUID PRIMARY KEY,
+  name TEXT,
+  type TEXT,              -- 'direct' or 'group'
+  creatorID UUID,
+  participants SET<UUID>,
+  createdAt TIMESTAMP,
+  updatedAt TIMESTAMP,
+  isActive BOOLEAN,
+  avatarURL TEXT,
+  description TEXT,
+  lastMessageID TIMEUUID
+);
+
+
+
+CREATE TABLE conversations_by_user (
+  userID UUID,
+  lastMessageAt TIMESTAMP,
+  convoID UUID,
+  convoName TEXT,
+  convoType TEXT,
+  lastMessage TEXT,
+  lastMessageSenderID UUID,
+  unreadCount INT,          -- Backup for Redis
+  lastOpenedAt TIMESTAMP,
+  isPinned BOOLEAN,
+  isArchived BOOLEAN,
+  PRIMARY KEY (userID, lastMessageAt)
+) WITH CLUSTERING ORDER BY (lastMessageAt DESC)
+  AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+
+
+CREATE TABLE message_reads (
+  convoID UUID,
+  messageID TIMEUUID,
+  userID UUID,
+  readAt TIMESTAMP,
+  PRIMARY KEY ((convoID, messageID), userID)
+) WITH COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+
+
+CREATE TABLE message_reactions (
+  convoID UUID,
+  messageID TIMEUUID,
+  reaction TEXT,                 -- '👍', '❤️', '😂'
+  userID UUID,
+  reactedAt TIMESTAMP,
+  PRIMARY KEY ((convoID, messageID, reaction), userID)
+);
+
+
+
+CREATE INDEX ON messages (senderID);
+CREATE INDEX ON conversations_by_user (convoID);
+CREATE INDEX ON message_reads (userID);

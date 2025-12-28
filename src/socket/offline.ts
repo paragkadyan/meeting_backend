@@ -1,24 +1,36 @@
-import { cassandra } from "../db/cassa";
+import { Socket } from 'socket.io';
+import { cassandra } from '../db/cassa';
+import { redis } from '../db/redis';
 
-export const handleOfflineSync = (socket: any) => {
-  socket.on("sync_messages", async () => {
-    const userId = socket.data.userId;
+export const handleOfflineSync = async (socket: Socket) => {
+  const userId = socket.data.user.id;
 
-    const result = await cassandra.execute(
-      `SELECT * FROM messages WHERE receiver_id=? AND delivered=false`,
-      [userId],
+  // Sync missed messages
+  socket.on('syncMessages', async ({ convoId, lastKnownMessageId }) => {
+    const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+    
+    const messages = await cassandra.execute(
+      `SELECT * FROM messages 
+       WHERE convoID = ? AND bucket = ? AND messageID > ?
+       ORDER BY messageID ASC`,
+      [convoId, bucket, lastKnownMessageId],
       { prepare: true }
     );
 
-    socket.emit("sync_messages", result.rows);
+    // Get unread count
+    const unreadCount = await redis.get(`unread:${userId}:${convoId}`) || 0;
+    
+    socket.emit('syncedMessages', {
+      convoId,
+      messages: messages.rows,
+      unreadCount: parseInt(unreadCount)
+    });
+  });
 
-    // mark delivered
-    for (const msg of result.rows) {
-      await cassandra.execute(
-        `UPDATE messages SET delivered=true WHERE id=?`,
-        [msg.id],
-        { prepare: true }
-      );
-    }
+  // Sync conversation list
+  socket.on('syncConversations', async () => {
+    const convos = await redis.hgetall(`user:${userId}:conversations`);
+    socket.emit('syncedConversations', { conversations: Object.entries(convos) });
   });
 };
+

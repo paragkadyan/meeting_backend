@@ -24,26 +24,25 @@ export const initSocket = (httpServer: import("http").Server) => {
   //io.use(socketAuth);
 
   io.on("connection", (socket) => {
-    //console.log(`Socket connected: ${socket.id}, user: ${socket.user?.id}`);
     const userId = socket.data.userId;
-    console.log(`Socket connected: ${socket.id}`);
+    console.log(`Socket connected: ${socket.id}, user: ${userId}`);
 
     socket.broadcast.emit("userJoined", { 
       socketId: socket.id, 
       message: `${socket.id} joined the chat` 
     });
 
-    socket.on("message", (data) => {
-    console.log("📨 Message from", socket.id, ":", data);
+  //   socket.on("message", (data) => {
+  //   console.log("📨 Message from", socket.id, ":", data);
     
-    const cleanText = (data.text || data).toString().trim();
-    socket.broadcast.emit("message", cleanText);
-    // socket.broadcast.emit("message", {
-    //   from: socket.id,
-    //   text: data.text || data,
-    //   timestamp: new Date().toISOString()
-    // });
-  });
+  //   const cleanText = (data.text || data).toString().trim();
+  //   socket.broadcast.emit("message", cleanText);
+  //   socket.broadcast.emit("message", {
+  //     from: socket.id,
+  //     text: data.text || data,
+  //     timestamp: new Date().toISOString()
+  //   });
+  // });
     
 
     handlePresence(userId, socket);
