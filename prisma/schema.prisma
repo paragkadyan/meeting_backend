@@ -36,6 +36,7 @@ model User {
   email        String      @unique
   password     String?
   name         String?
+  lname        String?
   profileURL   String?
   mobileNumber String?     @unique
   googleId     String?     @unique

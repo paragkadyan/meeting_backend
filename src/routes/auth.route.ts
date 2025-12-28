@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle } from '../controllers/auth.controller';
+import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle } from '../controllers/user.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
