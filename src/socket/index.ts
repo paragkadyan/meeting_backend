@@ -27,6 +27,17 @@ export const initSocket = (httpServer: import("http").Server) => {
     const userId = socket.data.userId;
     console.log(`Socket connected: ${socket.id}, user: ${userId}`);
 
+
+    socket.on("joinConvo", async ({ convoId }) => { 
+      socket.join(`room:${convoId}`); 
+      console.log(`User ${userId} joined room:${convoId}`); 
+    });
+    
+    socket.on("leaveConvo", async ({ convoId }) => { 
+      socket.leave(`room:${convoId}`); 
+      console.log(`User ${userId} left room:${convoId}`); 
+    });
+
     socket.broadcast.emit("userJoined", { 
       socketId: socket.id, 
       message: `${socket.id} joined the chat` 
@@ -52,7 +63,7 @@ export const initSocket = (httpServer: import("http").Server) => {
 
     socket.on("disconnect", (reason) => {
       console.log(`Socket disconnected: ${socket.id}, reason: ${reason}`);
-      handleDisconnect("123", socket);
+      handleDisconnect(userId, socket);
     });
   });
 
