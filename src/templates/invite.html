@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>You're Invited to Join Heyllow! </title>
+    <style>
+        body {
+            background: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            border-radius: 10px 10px 0 0;
+            text-align: center;
+        }
+
+        .logo {
+            width: 200px;
+            object-fit: cover;
+            object-position: center;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 40px auto;
+            background: #ffffff;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.12);
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #333333;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .info {
+            text-align: center;
+            margin-top: 15px;
+            color: #666666;
+            font-size: 14px;
+        }
+
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+            background: linear-gradient(135deg, #f4f6f9 0%, #e5e5e5 100%);
+            border-radius: 0 0 10px 10px;
+            padding: 10px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="{{logo}}" alt="Heyllow Logo" class="logo" />
+        </div>
+        <div class="content">
+            <div class="title">You're Invited to Join Heyllow! </div>
+            <p class="info">
+                You're invited to join <strong>{{appName}}</strong>!<br />
+                Click on the link below to sign up:<br />
+                <a href="{{signupUrl}}" class="btn">Sign Up</a>
+            </p>
+        </div>
+        <p class="footer">
+            &copy; 2025 Heyllow. All rights reserved.
+        </p>
+    </div>
+</body>
+
+</html>

@@ -185,7 +185,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     path: '/',
   });
 
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, userType: user.userType, phNumber: user.mobileNumber, dob: user.dob } }, 'login successful');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob } }, 'login successful');
   return res.status(200).json(response);
 });
 
@@ -291,16 +291,17 @@ export const logout = asyncHandler(async (req: Request, res: Response) => {
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
-  const newPassword = req.body;
+
+  const { currentPassword, newPassword } = req.body;
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     throw new apiError(404, 'User not found');
   }
-  const authProvider = user?.authProvider;
+  const AuthProvider = user?.authProvider;
 
-  if(authProvider == 'LOCAL' || authProvider == 'BOTH'){
-    const currentPassword = req.body;
+  if (AuthProvider == 'LOCAL' || AuthProvider == 'BOTH') {
+
     if (!currentPassword || !newPassword) {
       throw new apiError(400, 'current password and new password are required');
     }
@@ -316,7 +317,7 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
       throw new apiError(400, 'New password must be different from the current password');
     }
   }
-  else if (authProvider == 'GOOGLE'){
+  else if (AuthProvider == 'GOOGLE') {
     if (!newPassword) {
       throw new apiError(400, 'new password is required');
     }
@@ -324,7 +325,10 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   const newPasswordHash = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({
     where: { id: userId },
-    data: { password: newPasswordHash },
+    data: {
+      password: newPasswordHash,
+      authProvider: 'BOTH'
+    },
   });
   await revokeAllOnCompromise(user.id);
   const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Password changed successfully.');
@@ -404,6 +408,7 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
       dob: true,
       mobileNumber: true,
       profileURL: true,
+      authProvider: true,
     },
   });
   if (!user) {
@@ -438,7 +443,7 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
     });
   }
 
-  if (user.authProvider !== "GOOGLE") {
+  if (user.authProvider == "LOCAL") {
     throw new apiError(400, `Please login using ${user.authProvider}`);
   }
 
@@ -460,7 +465,7 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   });
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Login with Google successful.');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob } }, 'Login with Google successful.');
   return res.status(200).json(response);
 }
 );
@@ -479,5 +484,30 @@ export const inviteUser = asyncHandler(async (req: Request, res: Response) => {
     },
   });
   const response = new apiResponse(200, {}, 'Invitation sent successfully.');
+  return res.status(200).json(response);
+});
+
+export const searchUser = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = req.body;
+
+  if (!email) throw new apiError(400, 'Email is required to search users.');
+
+  const users = await prisma.user.findUnique({
+    where: {
+      email: email
+    },
+  });
+
+  if (!users) {
+    throw new apiError(404, 'User not found');
+  }
+
+  const response = new apiResponse(200, {
+    id: users.id,
+    name: users.name,
+    lname: users.lname,
+    email: users.email,
+    profileURL: users.profileURL
+  }, 'Users fetched successfully.');
   return res.status(200).json(response);
 });
