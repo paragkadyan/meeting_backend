@@ -57,8 +57,8 @@ export const createDirectChat = asyncHandler(async (req, res) => {
     );
     throw new apiError(500, "Failed to create conversation");
   }
-  await redis.sadd(`convo:${convoId}:participants`, ...participants).catch((err) => console.warn("Redis cache failed", err));
 
+ await redis.sAdd(`convo:${convoId}:participants`, participants);
 
   return res.status(201).json(new apiResponse(201, { convoId }, "Conversation created successfully"));
 });
