@@ -170,7 +170,7 @@ for (const convo of conversations) {
     return res.status(200).json(new apiResponse(200, [], "No other participants found"));
   }
 
-  return res.status(200).json(new apiResponse(200, allUserIds, "User IDs fetched"));
+  return res.status(200).json(new apiResponse(200, {allUserIds, conversations}, "User IDs fetched"));
 });
 
 export const getMessages = asyncHandler(async (req, res) => {
