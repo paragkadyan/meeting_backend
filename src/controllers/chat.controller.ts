@@ -36,7 +36,7 @@ export const createDirectChat = asyncHandler(async (req, res) => {
 
   if (!applied) {
     const existingConvoID = lookupResult.rows[0].convoid;
-    return res.status(200).json(new apiResponse(200,{ convoId: existingConvoID },"Direct chat already exists"));
+    return res.status(200).json(new apiResponse(200, { convoId: existingConvoID }, "Direct chat already exists"));
   }
 
   try {
@@ -189,18 +189,18 @@ export const getUsersBatch = asyncHandler(async (req, res) => {
   }
 
   const result = await prisma.user.findMany({
-  where: {
-    id: { in: userIds },
-  },
-  select: {
-    id: true,
-    name: true,
-    lname: true,
-    profileURL: true,
-    email: true,
-    mobileNumber: true,
-  },
-});
+    where: {
+      id: { in: userIds },
+    },
+    select: {
+      id: true,
+      name: true,
+      lname: true,
+      profileURL: true,
+      email: true,
+      mobileNumber: true,
+    },
+  });
 
   if (result.length === 0) {
     throw new apiError(404, "No users found");
