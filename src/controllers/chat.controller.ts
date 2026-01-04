@@ -49,6 +49,16 @@ export const createDirectChat = asyncHandler(async (req, res) => {
       [convoId, creatorID, participants],
       { prepare: true }
     );
+
+    await cassandra.execute(
+      `
+      INSERT INTO conversations_by_user
+      (userID, convoID, convoType, lastMessageAt, isPinned, isArchived)
+      VALUES (?, ?, 'direct', toTimestamp(now()), false, false)
+      `,
+      [creatorID, convoId],
+      { prepare: true }
+    );
   } catch (err) {
     await cassandra.execute(
       `DELETE FROM direct_chat_lookup WHERE pairKey = ?`,
@@ -150,7 +160,7 @@ for (const convo of conversations) {
 });
 
 export const getMessages = asyncHandler(async (req, res) => {
-  const { convoId } = req.params;
+  const { convoId } = req.body;
   const limit = Math.min(Number(req.query.limit) || 20, 50);
 
   const nowBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
