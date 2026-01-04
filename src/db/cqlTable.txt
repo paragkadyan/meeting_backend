@@ -11,7 +11,6 @@ CREATE TABLE messages (
   isDeleted BOOLEAN,
   deletedAt TIMESTAMP,
   replyToMessageID TIMEUUID,      -- Threaded replies
-  createdAt TIMESTAMP,
   PRIMARY KEY ((convoID, bucket), messageID)
 ) WITH CLUSTERING ORDER BY (messageID DESC)
   AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
@@ -49,13 +48,14 @@ CREATE TABLE conversations_by_user (
   convoType TEXT,
   lastMessage TEXT,
   lastMessageSenderID UUID,
-  unreadCount INT,          -- Backup for Redis
+  unreadCount INT,
   lastOpenedAt TIMESTAMP,
   isPinned BOOLEAN,
   isArchived BOOLEAN,
-  PRIMARY KEY (userID, lastMessageAt)
-) WITH CLUSTERING ORDER BY (lastMessageAt DESC)
-  AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+  PRIMARY KEY ((userID), lastMessageAt, convoID)
+)
+WITH CLUSTERING ORDER BY (lastMessageAt DESC)
+AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 
 
 CREATE TABLE message_reads (
@@ -76,8 +76,3 @@ CREATE TABLE message_reactions (
   PRIMARY KEY ((convoID, messageID, reaction), userID)
 );
 
-
-
-CREATE INDEX ON messages (senderID);
-CREATE INDEX ON conversations_by_user (convoID);
-CREATE INDEX ON message_reads (userID);

@@ -11,15 +11,21 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       const message = await cassandra.execute(
-        `INSERT INTO messages (convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID createdAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, toTimestamp(now())) RETURNING messageID`,
+        `INSERT INTO messages (convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING messageID`,
         [convoId, bucket, messageId, userId, content, messageType, [], null],
         { prepare: true }
       );
 
       await cassandra.execute(
-        `UPDATE conversations SET lastMessage = ?, WHERE convoID = ?`,
-        [messageId, convoId],
+        `UPDATE conversations SET lastMessageID = ?, WHERE convoID = ? AND userID = ?`,
+        [messageId, convoId, userId],
+        { prepare: true }
+      );
+
+      await cassandra.execute(
+        `UPDATE conversations_by_user SET lastMessage = ?, lastMessageSenderID = ?, WHERE convoID = ? AND userID = ?`,
+        [content, userId, convoId, userId],
         { prepare: true }
       );
 

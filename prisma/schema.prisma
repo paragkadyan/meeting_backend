@@ -12,15 +12,6 @@ enum UserType {
   PREMIUM
 }
 
-enum ConvoType {
-  DIRECT
-  GROUP
-}
-
-enum MemberRole {
-  MEMBER
-  ADMIN
-}
 
 enum AuthProvider {
   LOCAL
@@ -47,11 +38,6 @@ model User {
   userType     UserType    @default(REGULAR)
   timestamp    DateTime    @default(now())
 
-  
-
-  //Relations
-  createdConvos  Convo[]          @relation("UserCreatedConvos")
-  membership     ConvoMember[]
   feedbacks      Feedback[]
   payment        Payment[]        
   paymentID      String?          @unique
@@ -60,34 +46,6 @@ model User {
   @@index([mobileNumber])
 }
 
-model Convo {
-  id          String         @id @default(uuid())
-  type        ConvoType
-  title       String?
-  theme       String?
-  createdBy   String
-  timestamp   DateTime       @default(now())
-  profileURL  String?
-
-  //Relations
-  creator     User           @relation("UserCreatedConvos", fields: [createdBy], references: [id], onDelete: Cascade)
-  members     ConvoMember[]
-
-  @@index([createdBy])
-}
-
-model ConvoMember {
-  convoID String
-  userID  String
-  role    MemberRole @default(MEMBER)
-
-  //Relations
-  convo   Convo @relation(fields: [convoID], references: [id], onDelete: Cascade)
-  user    User  @relation(fields: [userID], references: [id], onDelete: Cascade)
-
-  @@id([convoID, userID])
-  @@index([userID])
-}
 
 model Feedback {
   id       String   @id @default(uuid())
