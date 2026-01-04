@@ -121,7 +121,21 @@ export const getConversations = asyncHandler(async (req, res) => {
     { prepare: true }
   );
 
-  const conversations = result.rows;
+  console.log(result);
+  
+
+  const conversations = result.rows.map(row => ({
+    convoId: row.convoid.toString(),              // convert Uuid -> string
+    convoName: row.convoname,
+    convoType: row.convotype,
+    lastMessageAt: row.lastmessageat,
+    lastMessage: row.lastmessage,
+    lastMessageSenderId: row.lastmessagesenderid?.toString() || null,
+    unreadCount: row.unreadcount || 0,
+    lastOpenedAt: row.lastopenedat,
+    isPinned: row.ispinned,
+    isArchived: row.isarchived
+  }));
 
   if (!conversations || conversations.length === 0) {
     return res.status(200).json(new apiResponse(200, [], "No conversations found"));
@@ -130,12 +144,12 @@ export const getConversations = asyncHandler(async (req, res) => {
   const convoParticipantsMap: Record<string, string[]> = {};
 
 for (const convo of conversations) {
-  const convoId = convo.convoID.toString();
+  const convoId = convo.convoId.toString();
 
-  const participantsRaw = await redis.smembers(`convo:${convoId}:participants`);
+  const participantsRaw = await redis.sMembers(`convo:${convoId}:participants`);
   let participants: string[] = [];
   if (Array.isArray(participantsRaw)) {
-    participants = participantsRaw.map(p => String(p)); // convert everything to string
+    participants = participantsRaw.map(p => String(p)); 
   }
 
   convoParticipantsMap[convoId] = participants;
