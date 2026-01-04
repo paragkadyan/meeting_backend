@@ -99,6 +99,21 @@ export const createGroupChat = asyncHandler(async (req, res) => {
 });
 
 export const getConversations = asyncHandler(async (req, res) => {
+
+  interface Conversation {
+    convoId: string;
+    convoName: string | null;
+    convoType: string;
+    lastMessageAt: Date | null;
+    lastMessage: string | null;
+    lastMessageSenderId: string | null;
+    unreadCount: number;
+    lastOpenedAt: Date | null;
+    isPinned: boolean;
+    isArchived: boolean;
+    participants?: string[];
+  }
+
   const userId = req.user!.id;
 
   const result = await cassandra.execute(
@@ -124,8 +139,8 @@ export const getConversations = asyncHandler(async (req, res) => {
   console.log(result);
   
 
-  const conversations = result.rows.map(row => ({
-    convoId: row.convoid.toString(),              // convert Uuid -> string
+  const conversations: Conversation[] = result.rows.map(row => ({
+    convoId: row.convoid.toString(),
     convoName: row.convoname,
     convoType: row.convotype,
     lastMessageAt: row.lastmessageat,
@@ -137,6 +152,7 @@ export const getConversations = asyncHandler(async (req, res) => {
     isArchived: row.isarchived
   }));
 
+
   if (!conversations || conversations.length === 0) {
     return res.status(200).json(new apiResponse(200, [], "No conversations found"));
   }
@@ -144,33 +160,19 @@ export const getConversations = asyncHandler(async (req, res) => {
   const convoParticipantsMap: Record<string, string[]> = {};
 
 for (const convo of conversations) {
-  const convoId = convo.convoId.toString();
+  for (const convo of conversations) {
+  const participants = await redis.sMembers(
+    `convo:${convo.convoId}:participants`
+  );
 
-  const participantsRaw = await redis.sMembers(`convo:${convoId}:participants`);
-  let participants: string[] = [];
-  if (Array.isArray(participantsRaw)) {
-    participants = participantsRaw.map(p => String(p)); 
-  }
+  convo.participants = Array.isArray(participants)
+    ? participants
+        .map(String)
+        .filter(id => id !== userId)
+    : [];
+}}
 
-  convoParticipantsMap[convoId] = participants;
-}
-
-  const allUserIdsSet = new Set<string>();
-  Object.values(convoParticipantsMap).forEach((participantArr) => {
-    participantArr.forEach((id) => {
-      allUserIdsSet.add(id);
-    });
-  });
-  
-  allUserIdsSet.delete(userId);
-
-  const allUserIds = Array.from(allUserIdsSet);
-
-  if (allUserIds.length === 0) {
-    return res.status(200).json(new apiResponse(200, [], "No other participants found"));
-  }
-
-  return res.status(200).json(new apiResponse(200, {allUserIds, conversations}, "User IDs fetched"));
+  return res.status(200).json(new apiResponse(200,  conversations, "User IDs fetched"));
 });
 
 export const getMessages = asyncHandler(async (req, res) => {
