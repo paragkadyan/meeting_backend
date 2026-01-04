@@ -25,6 +25,7 @@ export const initSocket = (httpServer: import("http").Server) => {
   io.on("connection", (socket) => {
     const userId = socket.data.user.id;
     console.log(`Socket connected: ${socket.id}, user: ${userId}`);
+    socket.join(`user:${userId}`);
     
     handlePresence(userId, socket);
     handleRooms(socket);

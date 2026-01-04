@@ -10,7 +10,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     try {
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-      const message = await cassandra.execute(
+      await cassandra.execute(
         `INSERT INTO messages (convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING messageID`,
         [convoId, bucket, messageId, userId, content, messageType, [], null],
@@ -29,6 +29,17 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         { prepare: true }
       );
 
+      const message = {
+        convoId,
+        messageId,
+        senderId: userId,
+        content,
+        messageType,
+        attachments: [],
+        replyToMessageID: null,
+        createdAt: new Date().toISOString(),
+      };
+
       const participants = await redis.smembers(`convo:${convoId}:participants`);
       if (!participants || !Array.isArray(participants)) {
         return;
@@ -38,6 +49,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         const unreadCount = await redis.hincrby(`unread:${participantId}:${convoId}`, 'count', 1);
         const lastMessage = await redis.hset(`user:${participantId}:conversations`, convoId, 
           JSON.stringify({ lastMessage: content, lastMessageAt: Date.now(), lastMessageSender: userId }));
+          socket.to(`user:${participantId}`).emit('unreadUpdated', {
+            convoId,
+            unreadCount
+          });
       }
 
       socket.to(`room:${convoId}`).emit('newMessage', message);
