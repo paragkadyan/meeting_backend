@@ -98,7 +98,7 @@ export const getConversations = asyncHandler(async (req, res) => {
       convoName,
       convoType,
       lastMessageAt,
-      lastMessage
+      lastMessage,
       lastMessageSenderID,
       unreadCount,
       lastOpenedAt,
@@ -111,9 +111,42 @@ export const getConversations = asyncHandler(async (req, res) => {
     { prepare: true }
   );
 
-  return res.status(200).json(
-    new apiResponse(200, result.rows, "Conversations fetched")
-  );
+  const conversations = result.rows;
+
+  if (!conversations || conversations.length === 0) {
+    return res.status(200).json(new apiResponse(200, [], "No conversations found"));
+  }
+
+  const convoParticipantsMap: Record<string, string[]> = {};
+
+for (const convo of conversations) {
+  const convoId = convo.convoID.toString();
+
+  const participantsRaw = await redis.smembers(`convo:${convoId}:participants`);
+  let participants: string[] = [];
+  if (Array.isArray(participantsRaw)) {
+    participants = participantsRaw.map(p => String(p)); // convert everything to string
+  }
+
+  convoParticipantsMap[convoId] = participants;
+}
+
+  const allUserIdsSet = new Set<string>();
+  Object.values(convoParticipantsMap).forEach((participantArr) => {
+    participantArr.forEach((id) => {
+      allUserIdsSet.add(id);
+    });
+  });
+  
+  allUserIdsSet.delete(userId);
+
+  const allUserIds = Array.from(allUserIdsSet);
+
+  if (allUserIds.length === 0) {
+    return res.status(200).json(new apiResponse(200, [], "No other participants found"));
+  }
+
+  return res.status(200).json(new apiResponse(200, allUserIds, "User IDs fetched"));
 });
 
 export const getMessages = asyncHandler(async (req, res) => {

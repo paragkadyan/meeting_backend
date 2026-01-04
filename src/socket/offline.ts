@@ -18,7 +18,7 @@ export const handleOfflineSync = async (socket: Socket) => {
     );
 
     // Get unread count
-    const unreadCount = await redis.get(`unread:${userId}:${convoId}`) || 0;
+    const unreadCount = await redis.get(`unread:${userId}:${convoId}`) || "0";
     
     socket.emit('syncedMessages', {
       convoId,
@@ -28,9 +28,9 @@ export const handleOfflineSync = async (socket: Socket) => {
   });
 
   // Sync conversation list
-  socket.on('syncConversations', async () => {
-    const convos = await redis.hgetall(`user:${userId}:conversations`);
-    socket.emit('syncedConversations', { conversations: Object.entries(convos) });
-  });
+  // socket.on('syncConversations', async () => {
+  //   const convos = await redis.hgetall(`user:${userId}:conversations`);
+  //   socket.emit('syncedConversations', { conversations: Object.entries(convos) });
+  // });
 };
 
