@@ -7,8 +7,14 @@ export const socketAuth = (socket: Socket, next: (err?: Error) => void) => {
     const raw = socket.handshake.headers.cookie;
     if (!raw) return next(new Error("No cookies"));
 
-    const cookies = cookie.parse(raw);
+    const cookies: Record<string, string> = {};
+    raw.split(';').forEach(pair => {
+      const [name, ...valueParts] = pair.trim().split('=');
+      cookies[name] = valueParts.join('=');
+    });
+
     const token = cookies.accessToken;
+
     if (!token) return next(new Error("No access token"));
 
     const decoded = verifyAccessToken(token);

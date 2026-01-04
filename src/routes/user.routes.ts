@@ -14,7 +14,7 @@ router.route('/get-conversations').get(
     authMiddleware, getConversations
 );
 
-router.route('/get-users-batch').get(
+router.route('/get-users-batch').post(
     authMiddleware, getUsersBatch
 );
 

@@ -68,7 +68,7 @@ export const createDirectChat = asyncHandler(async (req, res) => {
     throw new apiError(500, "Failed to create conversation");
   }
 
- await redis.sAdd(`convo:${convoId}:participants`, participants);
+  await redis.sAdd(`convo:${convoId}:participants`, participants);
 
   return res.status(201).json(new apiResponse(201, { convoId }, "Conversation created successfully"));
 });
@@ -136,8 +136,6 @@ export const getConversations = asyncHandler(async (req, res) => {
     { prepare: true }
   );
 
-  console.log(result);
-  
 
   const conversations: Conversation[] = result.rows.map(row => ({
     convoId: row.convoid.toString(),
@@ -159,20 +157,21 @@ export const getConversations = asyncHandler(async (req, res) => {
 
   const convoParticipantsMap: Record<string, string[]> = {};
 
-for (const convo of conversations) {
   for (const convo of conversations) {
-  const participants = await redis.sMembers(
-    `convo:${convo.convoId}:participants`
-  );
+    for (const convo of conversations) {
+      const participants = await redis.sMembers(
+        `convo:${convo.convoId}:participants`
+      );
 
-  convo.participants = Array.isArray(participants)
-    ? participants
-        .map(String)
-        .filter(id => id !== userId)
-    : [];
-}}
+      convo.participants = Array.isArray(participants)
+        ? participants
+          .map(String)
+          .filter(id => id !== userId)
+        : [];
+    }
+  }
 
-  return res.status(200).json(new apiResponse(200,  conversations, "User IDs fetched"));
+  return res.status(200).json(new apiResponse(200, conversations, "User IDs fetched"));
 });
 
 export const getMessages = asyncHandler(async (req, res) => {
