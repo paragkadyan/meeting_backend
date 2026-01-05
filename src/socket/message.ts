@@ -12,11 +12,14 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
-        `INSERT INTO messages (convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING messageID`,
+        `INSERT INTO messages (
+          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [convoId, bucket, messageId, userId, content, messageType, [], null],
         { prepare: true }
       );
+
 
       await prisma.conversationByUser.updateMany({
         where: { convoId },
@@ -45,23 +48,23 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         createdAt: new Date().toISOString(),
       };
 
-      const participants = await redis.smembers(`convo:${convoId}:participants`);
+      const participants = await redis.sMembers(`convo:${convoId}:participants`);
       if (!participants || !Array.isArray(participants)) {
         return;
       }
       for (const participantId of participants) {
         if (participantId === userId) continue;
-        const unreadCount = await redis.hincrby(`unread:${participantId}:${convoId}`, 'count', 1);
-        const lastMessage = await redis.hset(`user:${participantId}:conversations`, convoId, 
+        const unreadCount = await redis.hIncrBy(`unread:${participantId}:${convoId}`, 'count', 1);
+        const lastMessage = await redis.hSet(`user:${participantId}:convo:meta`, convoId,
           JSON.stringify({ lastMessage: content, lastMessageAt: Date.now(), lastMessageSender: userId }));
-          socket.to(`user:${participantId}`).emit('unreadUpdated', {
-            convoId,
-            unreadCount
-          });
+        socket.to(`user:${participantId}`).emit('unreadUpdated', {
+          convoId,
+          unreadCount
+        });
       }
 
       socket.to(`room:${convoId}`).emit('newMessage', message);
-      socket.emit('messageSent');  
+      socket.emit('messageSent');
 
     } catch (error) {
       socket.emit('error', { message: 'Failed to send message' });
@@ -73,11 +76,11 @@ export const handleMessages = async (io: Server, socket: Socket) => {
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
       await redis.del(`unread:${userId}:${convoId}`);
-      socket.to(`room:${convoId}`).emit('messagesRead', { 
-      userId, 
-      convoId, 
-      lastMessageId 
-    });
+      socket.to(`room:${convoId}`).emit('messagesRead', {
+        userId,
+        convoId,
+        lastMessageId
+      });
     } catch (error) {
       console.error('Mark read error:', error);
       socket.emit('error', { message: 'Failed to mark messages as read' });

@@ -7,7 +7,7 @@ export const handleRooms = (socket: Socket) => {
 
   socket.on('joinRoom', async ({ convoId }) => {
 
-    const isMember = await redis.sismember(
+    const isMember = await redis.sIsMember(
       `convo:${convoId}:participants`,
       userId
     );
@@ -19,17 +19,17 @@ export const handleRooms = (socket: Socket) => {
     }
 
     socket.join(`room:${convoId}`);
-    
 
-    await redis.sadd(`user:${userId}:conversations`, convoId);
-    
-    await redis.sadd(`convo:${convoId}:online`, userId);
-    
-    socket.to(`room:${convoId}`).emit('userJoined', { 
-      userId, 
-      convoId 
+
+    await redis.sAdd(`user:${userId}:conversations`, convoId);
+
+    await redis.sAdd(`convo:${convoId}:online`, userId);
+
+    socket.to(`room:${convoId}`).emit('userJoined', {
+      userId,
+      convoId
     });
-    
+
     console.log(`✅ ${userId} joined room: ${convoId}`);
   });
 
@@ -40,7 +40,7 @@ export const handleRooms = (socket: Socket) => {
   });
 
   socket.on('getRoomUsers', async ({ convoId }) => {
-    const onlineUsers = await redis.smembers(`convo:${convoId}:online`);
+    const onlineUsers = await redis.sMembers(`convo:${convoId}:online`);
     socket.emit('roomUsers', { convoId, onlineUsers });
   });
 };
