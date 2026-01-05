@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { createDirectChat, getConversations, getMessages, getUsersBatch } from '../controllers/chat.controller';
+import { createDirectChat, createGroupChat, getConversations, getMessages, getUsersBatch } from '../controllers/chat.controller';
 
 
 const router = Router();
@@ -8,6 +8,10 @@ const router = Router();
 
 router.route('/create-direct-chat').post(
     authMiddleware, createDirectChat
+);
+
+router.route('/create-group-chat').post(
+    authMiddleware, createGroupChat
 );
 
 router.route('/get-conversations').get(

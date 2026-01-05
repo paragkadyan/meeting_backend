@@ -1,11 +1,11 @@
 import { cassandra } from "../db/cassa";
 import { asyncHandler } from "../utils/asyncHandler";
-import { errorHandler } from "../middleware/errorHandler.middleware";
 import { apiResponse } from "../utils/apiResponse";
 import { apiError } from "../utils/apiError";
 import { v4 as uuidv4 } from "uuid";
 import { redis } from "../db/redis";
 import { prisma } from '../db/post';
+
 
 export const createDirectChat = asyncHandler(async (req, res) => {
   const { participants, creatorID } = req.body;
@@ -20,63 +20,63 @@ export const createDirectChat = asyncHandler(async (req, res) => {
 
   const [u1, u2] = [...participants].sort();
   const pairKey = `${u1}_${u2}`;
-  const convoId = uuidv4();
 
-  const lookupResult = await cassandra.execute(
-    `
-    INSERT INTO direct_chat_lookup (pairKey, convoID, createdAt)
-    VALUES (?, ?, toTimestamp(now()))
-    IF NOT EXISTS
-    `,
-    [pairKey, convoId],
-    { prepare: true }
+  const result = await prisma.$transaction(async (tx) => {
+    const existing = await tx.directChatLookup.findUnique({
+      where: { pairKey }
+    });
+
+    if (existing) {
+      return { convoId: existing.convoId, existed: true };
+    }
+
+    const conversation = await tx.conversation.create({
+      data: {
+        type: "direct",
+        creatorId: creatorID,
+        participants: {
+          createMany: {
+            data: participants.map((userId) => ({ userId }))
+          }
+        },
+        convoStates: {
+          createMany: {
+            data: participants.map((userId) => ({
+              userId,
+              convoType: "direct"
+            }))
+          }
+        }
+      }
+    });
+
+    await tx.directChatLookup.create({
+      data: {
+        pairKey,
+        convoId: conversation.id
+      }
+    });
+
+    return { convoId: conversation.id, existed: false };
+  });
+
+  if (result.existed) {
+    return res.status(200).json(
+      new apiResponse(200, { convoId: result.convoId }, "Direct chat already exists")
+    );
+  }
+
+  await redis.sAdd(`convo:${result.convoId}:participants`, participants);
+
+  return res.status(201).json(
+    new apiResponse(201, { convoId: result.convoId }, "Conversation created successfully")
   );
-
-  const applied = lookupResult.rows[0]["[applied]"];
-
-  if (!applied) {
-    const existingConvoID = lookupResult.rows[0].convoid;
-    return res.status(200).json(new apiResponse(200, { convoId: existingConvoID }, "Direct chat already exists"));
-  }
-
-  try {
-    await cassandra.execute(
-      `
-      INSERT INTO conversations
-      (convoID, type, creatorID, participants, createdAt, isActive)
-      VALUES (?, 'direct', ?, ?, toTimestamp(now()), true)
-      `,
-      [convoId, creatorID, participants],
-      { prepare: true }
-    );
-
-    await cassandra.execute(
-      `
-      INSERT INTO conversations_by_user
-      (userID, convoID, convoType, lastMessageAt, isPinned, isArchived)
-      VALUES (?, ?, 'direct', toTimestamp(now()), false, false)
-      `,
-      [creatorID, convoId],
-      { prepare: true }
-    );
-  } catch (err) {
-    await cassandra.execute(
-      `DELETE FROM direct_chat_lookup WHERE pairKey = ?`,
-      [pairKey],
-      { prepare: true }
-    );
-    throw new apiError(500, "Failed to create conversation");
-  }
-
-  await redis.sAdd(`convo:${convoId}:participants`, participants);
-
-  return res.status(201).json(new apiResponse(201, { convoId }, "Conversation created successfully"));
 });
 
 export const createGroupChat = asyncHandler(async (req, res) => {
-  const { groupName, participants, creatorID, avatarURL, descrption } = req.body;
+  const { groupName, participants, creatorID, avatarURL, description } = req.body;
 
-  if (!groupName || !participants || !Array.isArray(participants)) {
+  if (!groupName || !Array.isArray(participants)) {
     throw new apiError(400, "Invalid group chat data");
   }
 
@@ -84,128 +84,165 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     throw new apiError(400, "Group chat must have at least 2 participants");
   }
 
-  const convoId = uuidv4();
+  if (!participants.includes(creatorID)) {
+    participants.push(creatorID);
+  }
 
-  await cassandra.execute(
-    `INSERT INTO conversations (convoID, type, creatorID, name, participants, avatarURL, description, createdAt, isActive)
-       VALUES (?, ?, ?, ?, ?, ?, ?, now(), true)`,
-    [convoId, "group", creatorID, groupName, participants, avatarURL || null, descrption || null],
-    { prepare: true }
+  const conversation = await prisma.$transaction(async (tx) => {
+    return tx.conversation.create({
+      data: {
+        type: "group",
+        name: groupName,
+        creatorId: creatorID,
+        avatarURL: avatarURL ?? null,
+        description: description ?? null,
+        participants: {
+          createMany: {
+            data: participants.map((userId) => ({ userId }))
+          }
+        },
+        convoStates: {
+          createMany: {
+            data: participants.map((userId) => ({
+              userId,
+              convoType: "group"
+            }))
+          }
+        }
+      }
+    });
+  });
+
+  await redis.sAdd(
+    `convo:${conversation.id}:participants`,
+    participants
   );
 
-  await redis.sadd(`convo:${convoId}:participants`, ...participants);
-
-  return res.status(201).json(new apiResponse(201, { convoId }, "Group conversation created successfully"));
+  return res.status(201).json(
+    new apiResponse(
+      201,
+      { convoId: conversation.id },
+      "Group conversation created successfully"
+    )
+  );
 });
+
+type ConversationDTO = {
+  convoId: string;
+  convoName: string | null;
+  convoType: string | null;
+  lastMessage: string | null;
+  lastMessageSenderId: string | null;
+  lastMessageAt: Date | null;
+  unreadCount: number;
+  lastOpenedAt: Date | null;
+  isPinned: boolean;
+  isArchived: boolean;
+  participants?: string[];
+};
 
 export const getConversations = asyncHandler(async (req, res) => {
-
-  interface Conversation {
-    convoId: string;
-    convoName: string | null;
-    convoType: string;
-    lastMessageAt: Date | null;
-    lastMessage: string | null;
-    lastMessageSenderId: string | null;
-    unreadCount: number;
-    lastOpenedAt: Date | null;
-    isPinned: boolean;
-    isArchived: boolean;
-    participants?: string[];
-  }
-
   const userId = req.user!.id;
 
-  const result = await cassandra.execute(
-    `
-    SELECT 
-      convoID,
-      convoName,
-      convoType,
-      lastMessageAt,
-      lastMessage,
-      lastMessageSenderID,
-      unreadCount,
-      lastOpenedAt,
-      isPinned,
-      isArchived
-    FROM conversations_by_user
-    WHERE userID = ?
-    `,
-    [userId],
-    { prepare: true }
-  );
+  const rows = await prisma.conversationByUser.findMany({
+    where: { userId },
+    orderBy: [
+      { isPinned: "desc" },
+      { lastMessageAt: "desc" }, 
+    ],
+    select: {
+      convoId: true,
+      convoName: true,
+      convoType: true,
+      lastMessage: true,
+      lastMessageSenderId: true,
+      lastMessageAt: true,
+      unreadCount: true,
+      lastOpenedAt: true,
+      isPinned: true,
+      isArchived: true,
 
+      conversation: {
+        select: {
+          participants: {
+            where: { userId: { not: userId } },
+            select: { userId: true },
+          },
+        },
+      },
+    },
+  });
 
-  const conversations: Conversation[] = result.rows.map(row => ({
-    convoId: row.convoid.toString(),
-    convoName: row.convoname,
-    convoType: row.convotype,
-    lastMessageAt: row.lastmessageat,
-    lastMessage: row.lastmessage,
-    lastMessageSenderId: row.lastmessagesenderid?.toString() || null,
-    unreadCount: row.unreadcount || 0,
-    lastOpenedAt: row.lastopenedat,
-    isPinned: row.ispinned,
-    isArchived: row.isarchived
+  const conversations: ConversationDTO[] = rows.map((r) => ({
+    convoId: r.convoId,
+    convoName: r.convoName,
+    convoType: r.convoType,
+    lastMessage: r.lastMessage,
+    lastMessageSenderId: r.lastMessageSenderId,
+    lastMessageAt: r.lastMessageAt,
+    unreadCount: r.unreadCount,
+    lastOpenedAt: r.lastOpenedAt,
+    isPinned: r.isPinned,
+    isArchived: r.isArchived,
+    participants: r.conversation?.participants?.map((p) => p.userId) ?? [],
   }));
 
-
-  if (!conversations || conversations.length === 0) {
-    return res.status(200).json(new apiResponse(200, [], "No conversations found"));
-  }
-
-  const convoParticipantsMap: Record<string, string[]> = {};
-
-  for (const convo of conversations) {
-    for (const convo of conversations) {
-      const participants = await redis.sMembers(
-        `convo:${convo.convoId}:participants`
-      );
-
-      convo.participants = Array.isArray(participants)
-        ? participants
-          .map(String)
-          .filter(id => id !== userId)
-        : [];
-    }
-  }
-
-  return res.status(200).json(new apiResponse(200, conversations, "User IDs fetched"));
+  return res
+    .status(200)
+    .json(new apiResponse(200, conversations, "Conversations fetched"));
 });
+
+
 
 export const getMessages = asyncHandler(async (req, res) => {
   const { convoId } = req.body;
   const limit = Math.min(Number(req.query.limit) || 20, 50);
 
-  const nowBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-  let bucket = nowBucket;
+  if (!convoId) {
+    return res.status(400).json(new apiResponse(400, null, "convoId is required"));
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const nowBucket = Math.floor(Date.now() / dayMs);
 
   const messages: any[] = [];
+  const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30); // safety cap
 
-  while (messages.length < limit && bucket >= 0) {
+  const query = `
+    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+    LIMIT ?;
+  `;
+
+  for (let i = 0; i < lookbackDays && messages.length < limit; i++) {
+    const bucket = nowBucket - i;
+    if (bucket < 0) break;
+
     const remaining = limit - messages.length;
 
     const result = await cassandra.execute(
-      `
-      SELECT *
-      FROM messages
-      WHERE convoID = ?
-        AND bucket = ?
-      LIMIT ?
-      `,
+      query,
       [convoId, bucket, remaining],
-      { prepare: true }
+      { prepare: true } 
     );
 
     messages.push(...result.rows);
-    bucket--;
   }
 
+  messages.sort((a: any, b: any) => {
+    const at = a.messageid?.getDate ? a.messageid.getDate().getTime() : 0;
+    const bt = b.messageid?.getDate ? b.messageid.getDate().getTime() : 0;
+    return bt - at;
+  });
+
   return res.status(200).json(
-    new apiResponse(200, messages, "Messages fetched")
+    new apiResponse(200, messages.slice(0, limit), "Messages fetched")
   );
 });
+
 
 export const getUsersBatch = asyncHandler(async (req, res) => {
   const { userIds } = req.body;

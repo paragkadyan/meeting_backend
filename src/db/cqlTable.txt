@@ -40,21 +40,20 @@ CREATE TABLE conversations (
 
 
 
-CREATE TABLE conversations_by_user (
-  userID UUID,
-  lastMessageAt TIMESTAMP,
-  convoID UUID,
-  convoName TEXT,
-  convoType TEXT,
-  lastMessage TEXT,
-  lastMessageSenderID UUID,
-  unreadCount INT,
-  lastOpenedAt TIMESTAMP,
-  isPinned BOOLEAN,
-  isArchived BOOLEAN,
-  PRIMARY KEY ((userID), lastMessageAt, convoID)
-)
-WITH CLUSTERING ORDER BY (lastMessageAt DESC)
+CREATE TABLE chatapp.conversations_by_user (
+    userid uuid,
+    lastmessageat timestamp,
+    convoid uuid,
+    convoname text,
+    convotype text,
+    isarchived boolean,
+    ispinned boolean,
+    lastmessage text,
+    lastmessagesenderid uuid,
+    lastopenedat timestamp,
+    unreadcount int,
+    PRIMARY KEY (userid, lastmessageat, convoid)
+) WITH CLUSTERING ORDER BY (lastmessageat DESC, convoid ASC)
 AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 
 

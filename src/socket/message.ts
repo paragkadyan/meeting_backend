@@ -2,6 +2,7 @@ import { Socket, Server } from 'socket.io';
 import { types } from 'cassandra-driver';
 import { cassandra } from '../db/cassa';
 import { redis } from '../db/redis';
+import { prisma } from '../db/post';
 
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
@@ -17,17 +18,21 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         { prepare: true }
       );
 
-      await cassandra.execute(
-        `UPDATE conversations SET lastMessageID = ?, WHERE convoID = ? AND userID = ?`,
-        [messageId, convoId, userId],
-        { prepare: true }
-      );
+      await prisma.conversationByUser.updateMany({
+        where: { convoId },
+        data: {
+          lastMessage: content,
+          lastMessageSenderId: userId,
+          lastMessageAt: new Date(),
+        },
+      });
 
-      await cassandra.execute(
-        `UPDATE conversations_by_user SET lastMessage = ?, lastMessageSenderID = ?, WHERE convoID = ? AND userID = ?`,
-        [content, userId, convoId, userId],
-        { prepare: true }
-      );
+      await prisma.conversationByUser.updateMany({
+        where: { convoId, userId: { not: userId } },
+        data: {
+          unreadCount: { increment: 1 },
+        },
+      });
 
       const message = {
         convoId,

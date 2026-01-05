@@ -5,7 +5,6 @@ import { redis } from '../db/redis';
 export const handleOfflineSync = async (socket: Socket) => {
   const userId = socket.data.user.id;
 
-  // Sync missed messages
   socket.on('syncMessages', async ({ convoId, lastKnownMessageId }) => {
     const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
     
@@ -17,7 +16,6 @@ export const handleOfflineSync = async (socket: Socket) => {
       { prepare: true }
     );
 
-    // Get unread count
     const unreadCount = await redis.get(`unread:${userId}:${convoId}`) || "0";
     
     socket.emit('syncedMessages', {
