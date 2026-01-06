@@ -52,16 +52,41 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       if (!participants || !Array.isArray(participants)) {
         return;
       }
+
       for (const participantId of participants) {
         if (participantId === userId) continue;
-        const unreadCount = await redis.hIncrBy(`unread:${participantId}:${convoId}`, 'count', 1);
-        const lastMessage = await redis.hSet(`user:${participantId}:convo:meta`, convoId,
-          JSON.stringify({ lastMessage: content, lastMessageAt: Date.now(), lastMessageSender: userId }));
+
+        // 1️⃣ UNREAD COUNTER (HASH)
+        const unreadKey = `unread:${participantId}:${convoId}`;
+        const unreadType = await redis.type(unreadKey);
+        if (unreadType !== 'none' && unreadType !== 'hash') {
+          await redis.del(unreadKey);
+        }
+        await redis.hSetNX(unreadKey, 'count', '0');
+        const unreadCount = await redis.hIncrBy(unreadKey, 'count', 1);
+
+        // 3️⃣ CONVERSATION META (HASH)
+        const metaKey = `user:${participantId}:convo:meta`;
+        const metaType = await redis.type(metaKey);
+        if (metaType !== 'none' && metaType !== 'hash') {
+          await redis.del(metaKey);
+        }
+        await redis.hSet(
+          metaKey,
+          convoId,
+          JSON.stringify({
+            lastMessage: content,
+            lastMessageAt: Date.now(),
+            lastMessageSender: userId,
+          })
+        );
+
         socket.to(`user:${participantId}`).emit('unreadUpdated', {
           convoId,
-          unreadCount
+          unreadCount,
         });
       }
+
 
       socket.to(`room:${convoId}`).emit('newMessage', message);
       socket.emit('messageSent');

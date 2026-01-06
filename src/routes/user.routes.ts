@@ -22,7 +22,7 @@ router.route('/get-users-batch').post(
     authMiddleware, getUsersBatch
 );
 
-router.route('/get-messages').get(
+router.route('/get-messages').post(
     authMiddleware, getMessages
 );
 

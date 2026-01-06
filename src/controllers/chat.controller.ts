@@ -148,7 +148,7 @@ export const getConversations = asyncHandler(async (req, res) => {
     where: { userId },
     orderBy: [
       { isPinned: "desc" },
-      { lastMessageAt: "desc" }, 
+      { lastMessageAt: "desc" },
     ],
     select: {
       convoId: true,
@@ -210,7 +210,7 @@ export const getMessages = asyncHandler(async (req, res) => {
 
   const query = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -226,7 +226,7 @@ export const getMessages = asyncHandler(async (req, res) => {
     const result = await cassandra.execute(
       query,
       [convoId, bucket, remaining],
-      { prepare: true } 
+      { prepare: true }
     );
 
     messages.push(...result.rows);
