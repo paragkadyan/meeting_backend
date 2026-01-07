@@ -7,7 +7,7 @@ import { prisma } from '../db/post';
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
 
-  socket.on('sendMessage', async ({ convoId, content, messageType = 'text' }) => {
+  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null }) => {
     try {
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
@@ -56,21 +56,11 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       for (const participantId of participants) {
         if (participantId === userId) continue;
 
-        // 1️⃣ UNREAD COUNTER (HASH)
         const unreadKey = `unread:${participantId}:${convoId}`;
-        const unreadType = await redis.type(unreadKey);
-        if (unreadType !== 'none' && unreadType !== 'hash') {
-          await redis.del(unreadKey);
-        }
         await redis.hSetNX(unreadKey, 'count', '0');
         const unreadCount = await redis.hIncrBy(unreadKey, 'count', 1);
 
-        // 3️⃣ CONVERSATION META (HASH)
         const metaKey = `user:${participantId}:convo:meta`;
-        const metaType = await redis.type(metaKey);
-        if (metaType !== 'none' && metaType !== 'hash') {
-          await redis.del(metaKey);
-        }
         await redis.hSet(
           metaKey,
           convoId,
@@ -86,9 +76,8 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           unreadCount,
         });
       }
-
-
       socket.to(`room:${convoId}`).emit('newMessage', message);
+      //io.to(`user:${userId}`).emit('newMessage', message);
       socket.emit('messageSent');
 
     } catch (error) {
@@ -101,6 +90,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
       await redis.del(`unread:${userId}:${convoId}`);
+      await prisma.conversationByUser.update({ where: { userId_convoId: { userId, convoId } }, data: { unreadCount: 0, lastOpenedAt: new Date() }, });
       socket.to(`room:${convoId}`).emit('messagesRead', {
         userId,
         convoId,
@@ -111,4 +101,67 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       socket.emit('error', { message: 'Failed to mark messages as read' });
     }
   });
+
+  socket.on('typing', ({ convoId, isTyping }) => {
+    socket.to(`room:${convoId}`).emit('typing', {
+      userId,
+      convoId,
+      isTyping,
+    });
+  });
+
+  socket.on('stopTyping', ({ convoId }) => {
+    socket.to(`room:${convoId}`).emit('typing', {
+      userId,
+      convoId,
+      isTyping: false,
+    });
+  });
+
+  socket.on('editMessage', async ({ convoId, messageId, newContent }) => {
+    try {
+      const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+      await cassandra.execute(
+        `
+        UPDATE messages
+        SET content = ?, isEdited = true, editedAt = toTimestamp(now())
+        WHERE convoID = ? AND bucket = ? AND messageID = ?
+        `,
+        [newContent, convoId, bucket, messageId],
+        { prepare: true }
+      );
+      io.to(`room:${convoId}`).emit('messageEdited', {
+        convoId,
+        messageId,
+        newContent,
+      });
+    } catch (error) {
+      console.error('Edit message error:', error);
+      socket.emit('error', { message: 'Failed to edit message' });
+    }
+  });
+
+  socket.on('deleteMessage', async ({ convoId, messageId }) => {
+    try {
+      const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+      await cassandra.execute(
+        `
+        UPDATE messages
+        SET isDeleted = true, deletedAt = toTimestamp(now())
+        WHERE convoID = ? AND bucket = ? AND messageID = ?
+        `,
+        [convoId, bucket, messageId],
+        { prepare: true }
+      );
+      io.to(`room:${convoId}`).emit('messageDeleted', {
+        convoId,
+        messageId,
+      });
+    } catch (error) {
+      console.error('Delete message error:', error);
+      socket.emit('error', { message: 'Failed to delete message' });
+    }
+  });
+
+
 };

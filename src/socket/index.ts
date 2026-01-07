@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { redis } from "../db/redis";
-import { handleDisconnect, handlePresence } from "./presence";
+import { handlePresence } from "./presence";
 import { handleRooms } from "./room";
 import { handleMessages } from "./message";
 import { handleOfflineSync } from "./offline";
@@ -31,11 +31,6 @@ export const initSocket = (httpServer: import("http").Server) => {
     handleRooms(socket);
     handleMessages(io, socket);
     handleOfflineSync(socket);
-
-    socket.on("disconnect", (reason) => {
-      console.log(`Socket disconnected: ${socket.id}, reason: ${reason}`);
-      handleDisconnect(userId, socket);
-    });
   });
 
   // process.on("SIGINT", async () => {

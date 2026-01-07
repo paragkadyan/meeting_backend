@@ -20,18 +20,9 @@ export const handleRooms = (socket: Socket) => {
 
     socket.join(`room:${convoId}`);
 
-    const userConvosKey = `user:${userId}:conversations`;
+    await redis.sAdd(`user:${userId}:joinedConversations`,convoId);
 
-    const type = await redis.type(userConvosKey);
-    if (type !== 'none' && type !== 'set') {
-      await redis.del(userConvosKey); // recover from bad state
-    }
-
-    await redis.sAdd(userConvosKey, convoId);
-
-    // await redis.sAdd(`user:${userId}:conversations`, convoId);
-
-    await redis.sAdd(`convo:${convoId}:online`, userId);
+    //await redis.sAdd(`convo:${convoId}:online`, userId);
 
     socket.to(`room:${convoId}`).emit('userJoined', {
       userId,
