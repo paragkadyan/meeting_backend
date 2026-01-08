@@ -272,3 +272,15 @@ export const getUsersBatch = asyncHandler(async (req, res) => {
     new apiResponse(200, result, "User profiles fetched")
   );
 });
+
+
+export const userLastSeen = asyncHandler(async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    throw new apiError(400, "userId is required");
+  }
+  const lastSeen = await redis.get(`user:lastSeen:${userId}`);
+  return res.status(200).json(
+    new apiResponse(200, { userId, lastSeen: lastSeen ? new Date(parseInt(lastSeen)) : null }, "User last seen fetched")
+  );
+});

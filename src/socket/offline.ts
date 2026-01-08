@@ -25,10 +25,11 @@ export const handleOfflineSync = async (socket: Socket) => {
     });
   });
 
-  // Sync conversation list
-  // socket.on('syncConversations', async () => {
-  //   const convos = await redis.hgetall(`user:${userId}:conversations`);
-  //   socket.emit('syncedConversations', { conversations: Object.entries(convos) });
-  // });
+  socket.on('syncConversations', async () => {
+    const convosHash = await redis.hGetAll(`user:${userId}:conversations`);
+    const conversations = Object.values(convosHash).map(v =>JSON.parse(v));
+    socket.emit('syncedConversations', {conversations});
+  });
+
 };
 
