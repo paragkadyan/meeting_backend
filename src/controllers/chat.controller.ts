@@ -206,7 +206,7 @@ export const getMessages = asyncHandler(async (req, res) => {
   const nowBucket = Math.floor(Date.now() / dayMs);
 
   const messages: any[] = [];
-  const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30); // safety cap
+  const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30); 
 
   const query = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
@@ -228,14 +228,16 @@ export const getMessages = asyncHandler(async (req, res) => {
       [convoId, bucket, remaining],
       { prepare: true }
     );
-
-    messages.push(...result.rows);
+    for (const row of result.rows) {
+      if (!row.isdeleted) {
+        messages.push(row);
+        if (messages.length === limit) break;
+      }
+    }
   }
 
-  messages.sort((a: any, b: any) => {
-    const at = a.messageid?.getDate ? a.messageid.getDate().getTime() : 0;
-    const bt = b.messageid?.getDate ? b.messageid.getDate().getTime() : 0;
-    return bt - at;
+  messages.sort((a, b) => {
+    return b.messageid.getDate().getTime() - a.messageid.getDate().getTime();
   });
 
   return res.status(200).json(
@@ -282,5 +284,82 @@ export const userLastSeen = asyncHandler(async (req, res) => {
   const lastSeen = await redis.get(`user:lastSeen:${userId}`);
   return res.status(200).json(
     new apiResponse(200, { userId, lastSeen: lastSeen ? new Date(parseInt(lastSeen)) : null }, "User last seen fetched")
+  );
+});
+
+export const getOlderMessages = asyncHandler(async (req, res) => {
+  const { convoId, lastMessageId, lastBucket } = req.body;
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+
+  if (!convoId || !lastMessageId || lastBucket === undefined) {
+    return res
+      .status(400)
+      .json(new apiResponse(400, null, "Missing pagination params"));
+  }
+
+  const messages: any[] = [];
+  let bucket = Number(lastBucket);
+  let remaining = limit;
+
+  const sameBucketQuery = `
+    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+      AND messageID < ?
+    LIMIT ?;
+  `;
+
+  const olderBucketQuery = `
+    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+    LIMIT ?;
+  `;
+
+  const sameBucketResult = await cassandra.execute(
+    sameBucketQuery,
+    [convoId, bucket, lastMessageId, remaining],
+    { prepare: true }
+  );
+
+  for (const row of sameBucketResult.rows) {
+    if (!row.isdeleted) {
+      messages.push(row);
+      remaining--;
+    }
+    if (remaining === 0) break;
+  }
+
+  while (remaining > 0 && bucket > 0) {
+    bucket--;
+
+    const olderResult = await cassandra.execute(
+      olderBucketQuery,
+      [convoId, bucket, remaining],
+      { prepare: true }
+    );
+
+    if (olderResult.rows.length === 0) continue;
+
+    for (const row of olderResult.rows) {
+      if (!row.isdeleted) {
+        messages.push(row);
+        remaining--;
+      }
+      if (remaining === 0) break;
+    }
+  }
+
+  messages.sort(
+    (a, b) =>
+      b.messageid.getDate().getTime() - a.messageid.getDate().getTime()
+  );
+
+  return res.status(200).json(
+    new apiResponse(200, messages, "Older messages fetched")
   );
 });
