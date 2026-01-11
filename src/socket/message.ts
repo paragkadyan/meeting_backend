@@ -74,9 +74,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         socket.to(`user:${participantId}`).emit('unreadUpdated', {
           convoId,
           unreadCount,
+          message,
         });
       }
-      socket.to(`room:${convoId}`).emit('newMessage', message);
+      //socket.to(`room:${convoId}`).emit('newMessage', message);
       //io.to(`user:${userId}`).emit('newMessage', message);
       socket.emit('messageSent');
 
@@ -86,6 +87,68 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     }
   });
 
+  socket.on('messageReaction', async ({ convoId, messageId, reaction }) => {
+    try {
+      io.to(`room:${convoId}`).emit('messageReaction', {
+        convoId,
+        messageId,
+        userId,
+        reaction,
+      });
+
+       const existing = await cassandra.execute(
+        `
+        SELECT reaction FROM message_reactions
+        WHERE convoID = ?
+          AND messageID = ?
+          AND userID = ?
+        `,
+        [convoId, messageId, userId],
+        { prepare: true }
+      );
+      if (existing.rowLength === 0) {
+        await cassandra.execute(
+          `
+          INSERT INTO message_reactions
+          (convoID, messageID, userID, reaction, reactedAt)
+          VALUES (?, ?, ?, ?, toTimestamp(now()))
+          `,
+          [convoId, messageId, userId, reaction],
+          { prepare: true }
+        );
+      } else {
+        const oldReaction = existing.first().reaction;
+
+        if (oldReaction === reaction) {
+          await cassandra.execute(
+            `
+            DELETE FROM message_reactions
+            WHERE convoID = ?
+              AND messageID = ?
+              AND userID = ?
+            `,
+            [convoId, messageId, userId],
+            { prepare: true }
+          );
+        } else {
+          await cassandra.execute(
+            `
+            UPDATE message_reactions
+            SET reaction = ?, reactedAt = toTimestamp(now())
+            WHERE convoID = ?
+              AND messageID = ?
+              AND userID = ?
+            `,
+            [reaction, convoId, messageId, userId],
+            { prepare: true }
+          );
+        }
+      }
+    } catch (error) {
+        console.error('Reaction error:', error);
+        socket.emit('error', { message: 'Failed to react to message' });
+      }
+  });
 
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
