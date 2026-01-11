@@ -42,6 +42,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         messageId,
         senderId: userId,
         content,
+        bucket,
         messageType,
         attachments: [],
         replyToMessageID: null,
@@ -181,16 +182,15 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     });
   });
 
-  socket.on('editMessage', async ({ convoId, messageId, newContent }) => {
+  socket.on('editMessage', async ({ convoId, messageId, newContent, bucket }) => {
     try {
-      const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
         `
         UPDATE messages
         SET content = ?, isEdited = true, editedAt = toTimestamp(now())
         WHERE convoID = ? AND bucket = ? AND messageID = ?
         `,
-        [newContent, convoId, bucket, messageId],
+        [newContent,convoId, bucket, messageId],
         { prepare: true }
       );
       io.to(`room:${convoId}`).emit('messageEdited', {
@@ -204,9 +204,8 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     }
   });
 
-  socket.on('deleteMessage', async ({ convoId, messageId }) => {
+  socket.on('deleteMessage', async ({ convoId, messageId, bucket }) => {
     try {
-      const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
         `
         UPDATE messages
