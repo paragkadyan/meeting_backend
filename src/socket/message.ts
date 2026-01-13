@@ -75,10 +75,9 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         socket.to(`user:${participantId}`).emit('unreadUpdated', {
           convoId,
           unreadCount,
-          message,
         });
       }
-      //socket.to(`room:${convoId}`).emit('newMessage', message);
+      socket.to(`room:${convoId}`).emit('newMessage', message);
       //io.to(`user:${userId}`).emit('newMessage', message);
       socket.emit('messageSent');
 
