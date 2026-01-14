@@ -31,34 +31,39 @@ export const createDirectChat = asyncHandler(async (req, res) => {
     }
 
     const conversation = await tx.conversation.create({
-      data: {
-        type: "direct",
-        creatorId: creatorID,
-        participants: {
-          createMany: {
-            data: participants.map((userId) => ({ userId }))
-          }
+        data: {
+          type: "direct",
+
+          creator: {
+            connect: { id: creatorID },
+          },
         },
-        convoStates: {
-          createMany: {
-            data: participants.map((userId) => ({
-              userId,
-              convoType: "direct"
-            }))
-          }
-        }
-      }
-    });
+      });
+      await tx.conversationParticipant.createMany({
+        data: participants.map((userId) => ({
+          convoId: conversation.id,
+          userId,
+          role: "member",
+        })),
+      });
+      await tx.conversationByUser.createMany({
+        data: participants.map((userId) => ({
+          userId,
+          convoId: conversation.id,
+          convoType: "direct",
+          isActive: true,
+          unreadCount: 0,
+        })),
+      });
+      await tx.directChatLookup.create({
+        data: {
+          pairKey,
+          convoId: conversation.id,
+        },
+      });
 
-    await tx.directChatLookup.create({
-      data: {
-        pairKey,
-        convoId: conversation.id
-      }
+      return { convoId: conversation.id, existed: false };
     });
-
-    return { convoId: conversation.id, existed: false };
-  });
 
   if (result.existed) {
     return res.status(200).json(
@@ -74,48 +79,60 @@ export const createDirectChat = asyncHandler(async (req, res) => {
 });
 
 export const createGroupChat = asyncHandler(async (req, res) => {
-  const { groupName, participants, creatorID, avatarURL, description } = req.body;
+  const {
+    groupName,
+    participants,
+    avatarURL,
+    description,
+  } = req.body;
+
+  const creatorID = req.user!.id;
 
   if (!groupName || !Array.isArray(participants)) {
     throw new apiError(400, "Invalid group chat data");
   }
 
-  if (participants.length < 2) {
+  const uniqueParticipants = Array.from(
+    new Set([...participants, creatorID])
+  );
+
+  if (uniqueParticipants.length < 2) {
     throw new apiError(400, "Group chat must have at least 2 participants");
   }
 
-  if (!participants.includes(creatorID)) {
-    participants.push(creatorID);
-  }
-
   const conversation = await prisma.$transaction(async (tx) => {
-    return tx.conversation.create({
+    const convo = await tx.conversation.create({
       data: {
         type: "group",
         name: groupName,
         creatorId: creatorID,
         avatarURL: avatarURL ?? null,
         description: description ?? null,
-        participants: {
-          createMany: {
-            data: participants.map((userId) => ({ userId }))
-          }
-        },
-        convoStates: {
-          createMany: {
-            data: participants.map((userId) => ({
-              userId,
-              convoType: "group"
-            }))
-          }
-        }
-      }
+      },
     });
+    await tx.conversationParticipant.createMany({
+      data: uniqueParticipants.map((userId) => ({
+        convoId: convo.id,
+        userId,
+        role: userId === creatorID ? "admin" : "member",
+      })),
+    });
+    await tx.conversationByUser.createMany({
+      data: uniqueParticipants.map((userId) => ({
+        userId,
+        convoId: convo.id,
+        convoType: "group",
+        isActive: true,
+        unreadCount: 0,
+      })),
+    });
+
+    return convo;
   });
 
   await redis.sAdd(
     `convo:${conversation.id}:participants`,
-    participants
+    uniqueParticipants
   );
 
   return res.status(201).json(
@@ -361,5 +378,173 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
   return res.status(200).json(
     new apiResponse(200, messages, "Older messages fetched")
+  );
+});
+
+export const groupUpdate = asyncHandler(async (req, res) => {
+  const { convoId, groupName, avatarURL, description } = req.body;
+  if (!convoId) {
+    throw new apiError(400, "convoId is required");
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+  });
+  if (!convo || convo.type !== "group") {
+    throw new apiError(404, "Group conversation not found");
+  }
+  const userId = req.user!.id;
+
+  const user = await prisma.user.findFirst({
+    where: { id: userId },
+  });
+  if (!user) {
+    throw new apiError(403, "Not a participant of the group");
+  }
+  if (convo.creatorId !== userId) {
+    throw new apiError(403, "Only group admin can update the group");
+  }
+
+  const updateData: any = {};
+  if (groupName !== undefined) updateData.name = groupName;
+  if (avatarURL !== undefined) updateData.avatarURL = avatarURL;
+  if (description !== undefined) updateData.description = description;
+  
+  await prisma.conversation.update({
+    where: { id: convoId },
+    data: updateData,
+  });
+
+  return res.status(200).json(
+    new apiResponse(200, { convoId }, "Group updated successfully")
+  );
+});
+
+export const groupLeaveByUser = asyncHandler(async (req, res) => {
+  const { convoId } = req.body;
+  const userId = req.user!.id;
+
+  if (!convoId) {
+    return res.status(400).json({ message: "convoId is required" });
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+    select: { type: true }
+  });
+
+  if (!convo) {
+    return res.status(404).json({ message: "Conversation not found" });
+  }
+
+  if (convo.type !== "group") {
+    return res.status(400).json({ message: "Cannot leave direct chat" });
+  }
+
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: { convoId, userId }
+    }
+  });
+
+  if (!participant) {
+    return res.status(400).json({ message: "Not a group member" });
+  }
+
+  await prisma.$transaction([
+    prisma.conversationParticipant.delete({
+      where: {
+        convoId_userId: { convoId, userId }
+      }
+    }),
+
+    prisma.conversationByUser.update({
+      where: {
+        userId_convoId: { userId, convoId }
+      },
+      data: {
+        isActive: false,
+        leftAt: new Date()
+      }
+    })
+  ]);
+  await redis.sRem(`convo:${convoId}:participants`, userId);
+
+  return res.status(200).json(
+    new apiResponse(200, { convoId }, "Left group successfully")
+  );
+});
+
+export const addNewUsersToGroup = asyncHandler(async (req, res) => {
+  const { convoId, newUserIds } = req.body;
+  const userId = req.user!.id;
+
+  if (!convoId || !Array.isArray(newUserIds) || newUserIds.length === 0) {
+    throw new apiError(400, "Invalid request data");
+  }
+
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+  });
+
+  if (!convo || convo.type !== "group") {
+    throw new apiError(404, "Group conversation not found");
+  }
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId,
+      },
+    },
+  });
+
+  if (!participant || participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can add new users");
+  }
+
+  const existingParticipants = await prisma.conversationParticipant.findMany({
+    where: { convoId },
+    select: { userId: true },
+  });
+
+  const existingUserIds = new Set(
+    existingParticipants.map((p) => p.userId)
+  );
+
+  const usersToAdd = newUserIds.filter(
+    (id) => !existingUserIds.has(id)
+  );
+
+  if (usersToAdd.length === 0) {
+    return res.status(200).json(
+      new apiResponse(200, null, "Users already in group")
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.conversationParticipant.createMany({
+      data: usersToAdd.map((id) => ({
+        convoId,
+        userId: id,
+        role: "member",
+      })),
+    });
+
+    await tx.conversationByUser.createMany({
+      data: usersToAdd.map((id) => ({
+        userId: id,
+        convoId,
+        convoType: "group",
+        isActive: true,
+        unreadCount: 0,
+      })),
+    });
+  });
+
+  await redis.sAdd(
+    `convo:${convoId}:participants`,
+    usersToAdd
+  );
+  return res.status(200).json(
+    new apiResponse(200, { usersAdded: usersToAdd }, "Users added to group")
   );
 });
