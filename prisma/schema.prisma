@@ -12,15 +12,6 @@ enum UserType {
   PREMIUM
 }
 
-enum ConvoType {
-  DIRECT
-  GROUP
-}
-
-enum MemberRole {
-  MEMBER
-  ADMIN
-}
 
 enum AuthProvider {
   LOCAL
@@ -36,6 +27,7 @@ model User {
   email        String      @unique
   password     String?
   name         String?
+  lname        String?
   profileURL   String?
   mobileNumber String?     @unique
   googleId     String?     @unique
@@ -46,47 +38,18 @@ model User {
   userType     UserType    @default(REGULAR)
   timestamp    DateTime    @default(now())
 
-  
-
-  //Relations
-  createdConvos  Convo[]          @relation("UserCreatedConvos")
-  membership     ConvoMember[]
   feedbacks      Feedback[]
   payment        Payment[]        
   paymentID      String?          @unique
+
+  createdConversations Conversation[] @relation("Creator")
+  conversations        ConversationParticipant[]
+  convoStates          ConversationByUser[]
 
   @@index([email])
   @@index([mobileNumber])
 }
 
-model Convo {
-  id          String         @id @default(uuid())
-  type        ConvoType
-  title       String?
-  theme       String?
-  createdBy   String
-  timestamp   DateTime       @default(now())
-  profileURL  String?
-
-  //Relations
-  creator     User           @relation("UserCreatedConvos", fields: [createdBy], references: [id], onDelete: Cascade)
-  members     ConvoMember[]
-
-  @@index([createdBy])
-}
-
-model ConvoMember {
-  convoID String
-  userID  String
-  role    MemberRole @default(MEMBER)
-
-  //Relations
-  convo   Convo @relation(fields: [convoID], references: [id], onDelete: Cascade)
-  user    User  @relation(fields: [userID], references: [id], onDelete: Cascade)
-
-  @@id([convoID, userID])
-  @@index([userID])
-}
 
 model Feedback {
   id       String   @id @default(uuid())
@@ -112,4 +75,67 @@ model Payment {
   user      User     @relation(fields: [userID], references: [id])
 
   @@index([userID])
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  type        String   // 'direct' | 'group'
+  creatorId   String
+  name        String?
+  avatarURL  String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  creator     User     @relation("Creator", fields: [creatorId], references: [id])
+  participants ConversationParticipant[]
+  convoStates  ConversationByUser[]
+}
+
+
+model ConversationParticipant {
+  convoId  String
+  userId   String
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+
+  conversation Conversation @relation(fields: [convoId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([convoId, userId])
+}
+
+
+model ConversationByUser {
+  userId String
+  convoId String
+
+  convoName String?
+  convoType String?
+
+  lastMessage           String?
+  lastMessageSenderId   String?
+  lastMessageAt         DateTime?
+
+  unreadCount  Int      @default(0)
+  lastOpenedAt DateTime?
+
+  isPinned   Boolean @default(false)
+  isArchived Boolean @default(false)
+
+  isActive Boolean @default(true)
+  leftAt DateTime?
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [convoId], references: [id], onDelete: Cascade)
+
+  @@id([userId, convoId])
+  @@index([userId, isPinned, lastMessageAt(sort: Desc)])
+}
+
+
+model DirectChatLookup {
+  pairKey   String   @id
+  convoId   String   @unique
+  createdAt DateTime @default(now())
 }

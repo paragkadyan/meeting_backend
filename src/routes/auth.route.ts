@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle } from '../controllers/auth.controller';
+import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle, searchUser, inviteUser } from '../controllers/user.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -63,6 +63,14 @@ router.route("/google").post(
 
 router.route('/me').get(
     authMiddleware, getProfile
+);
+
+router.route('/search-user').post(
+    authMiddleware, searchUser
+);
+
+router.route('/invite-user').post(
+    authMiddleware, inviteUser
 );
 
 export default router;

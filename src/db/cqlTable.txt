@@ -1,0 +1,77 @@
+CREATE TABLE messages (
+  convoID UUID,
+  bucket INT,                    -- Daily bucket (0,1,2...) to prevent hot partitions
+  messageID TIMEUUID,
+  senderID UUID,
+  content TEXT,
+  messageType TEXT,               -- 'text', 'image', 'video', 'system'
+  attachments LIST<TEXT>,         -- ['https://...jpg', 'https://...mp4']
+  isEdited BOOLEAN,
+  editedAt TIMESTAMP,
+  isDeleted BOOLEAN,
+  deletedAt TIMESTAMP,
+  replyToMessageID TIMEUUID,      -- Threaded replies
+  PRIMARY KEY ((convoID, bucket), messageID)
+) WITH CLUSTERING ORDER BY (messageID DESC)
+  AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+  AND compaction = {
+    'class': 'TimeWindowCompactionStrategy',
+    'compaction_window_size': 1,
+    'compaction_window_unit': 'DAYS'
+  }
+  AND gc_grace_seconds = 86400;
+
+
+
+
+CREATE TABLE conversations (
+  convoID UUID PRIMARY KEY,
+  name TEXT,
+  type TEXT,              -- 'direct' or 'group'
+  creatorID UUID,
+  participants SET<UUID>,
+  createdAt TIMESTAMP,
+  updatedAt TIMESTAMP,
+  isActive BOOLEAN,
+  avatarURL TEXT,
+  description TEXT,
+  lastMessageID TIMEUUID
+);
+
+
+
+CREATE TABLE chatapp.conversations_by_user (
+    userid uuid,
+    lastmessageat timestamp,
+    convoid uuid,
+    convoname text,
+    convotype text,
+    isarchived boolean,
+    ispinned boolean,
+    lastmessage text,
+    lastmessagesenderid uuid,
+    lastopenedat timestamp,
+    unreadcount int,
+    PRIMARY KEY (userid, lastmessageat, convoid)
+) WITH CLUSTERING ORDER BY (lastmessageat DESC, convoid ASC)
+AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+
+
+CREATE TABLE message_reads (
+  convoID UUID,
+  messageID TIMEUUID,
+  userID UUID,
+  readAt TIMESTAMP,
+  PRIMARY KEY ((convoID, messageID), userID)
+) WITH COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
+
+
+CREATE TABLE message_reactions (
+  convoID UUID,
+  messageID TIMEUUID,
+  reaction TEXT,                 -- '👍', '❤️', '😂'
+  userID UUID,
+  reactedAt TIMESTAMP,
+  PRIMARY KEY ((convoID, messageID, reaction), userID)
+);
+

@@ -1,13 +1,52 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { addNewUsersToGroup, createDirectChat, createGroupChat, getConversations, getMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, userLastSeen, } from '../controllers/chat.controller';
 
 
 const router = Router();
 
 
-router.get('/profile', authMiddleware, (req, res) => {
-    return res.json({ ok: true, userId: req.user?.id });
-});
+router.route('/create-direct-chat').post(
+    authMiddleware, createDirectChat
+);
 
+router.route('/create-group-chat').post(
+    authMiddleware, createGroupChat
+);
 
+router.route('/get-conversations').get(
+    authMiddleware, getConversations
+);
+
+router.route('/get-users-batch').post(
+    authMiddleware, getUsersBatch
+);
+
+router.route('/get-messages').post(
+    authMiddleware, getMessages
+);
+
+router.route('/last-seen').get(
+    authMiddleware, userLastSeen
+);
+
+router.route(`/get-older-messages`).post(
+    authMiddleware, getOlderMessages
+);
+
+router.route('/group-update').post(
+    authMiddleware, groupUpdate
+);
+
+router.route('/group-leave').post(
+    authMiddleware, groupLeaveByUser
+);
+
+router.route('/add-member-to-group').post(
+    authMiddleware, addNewUsersToGroup
+);
+
+router.route('/remove-member-from-group').post(
+    authMiddleware, kickUserFromGroup
+);
 export default router;
