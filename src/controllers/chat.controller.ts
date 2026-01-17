@@ -181,12 +181,16 @@ export const getConversations = asyncHandler(async (req, res) => {
       isActive: true,
       leftAt: true,
 
+
       conversation: {
         select: {
           participants: {
             where: { userId: { not: userId } },
             select: { userId: true },
           },
+          name: true,
+          avatarURL: true,
+          description: true,
         },
       },
     },
@@ -206,6 +210,9 @@ export const getConversations = asyncHandler(async (req, res) => {
     participants: r.conversation?.participants?.map((p) => p.userId) ?? [],
     isActive: r.isActive,
     leftAt: r.leftAt,
+    name: r.conversation?.name ?? null,
+    avatarURL: r.conversation?.avatarURL ?? null,
+    description: r.conversation?.description ?? null,
   }));
 
   return res
