@@ -31,39 +31,39 @@ export const createDirectChat = asyncHandler(async (req, res) => {
     }
 
     const conversation = await tx.conversation.create({
-        data: {
-          type: "direct",
+      data: {
+        type: "direct",
 
-          creator: {
-            connect: { id: creatorID },
-          },
+        creator: {
+          connect: { id: creatorID },
         },
-      });
-      await tx.conversationParticipant.createMany({
-        data: participants.map((userId) => ({
-          convoId: conversation.id,
-          userId,
-          role: "member",
-        })),
-      });
-      await tx.conversationByUser.createMany({
-        data: participants.map((userId) => ({
-          userId,
-          convoId: conversation.id,
-          convoType: "direct",
-          isActive: true,
-          unreadCount: 0,
-        })),
-      });
-      await tx.directChatLookup.create({
-        data: {
-          pairKey,
-          convoId: conversation.id,
-        },
-      });
-
-      return { convoId: conversation.id, existed: false };
+      },
     });
+    await tx.conversationParticipant.createMany({
+      data: participants.map((userId) => ({
+        convoId: conversation.id,
+        userId,
+        role: "member",
+      })),
+    });
+    await tx.conversationByUser.createMany({
+      data: participants.map((userId) => ({
+        userId,
+        convoId: conversation.id,
+        convoType: "direct",
+        isActive: true,
+        unreadCount: 0,
+      })),
+    });
+    await tx.directChatLookup.create({
+      data: {
+        pairKey,
+        convoId: conversation.id,
+      },
+    });
+
+    return { convoId: conversation.id, existed: false };
+  });
 
   if (result.existed) {
     return res.status(200).json(
@@ -191,6 +191,7 @@ export const getConversations = asyncHandler(async (req, res) => {
           name: true,
           avatarURL: true,
           description: true,
+          creatorId: true,
         },
       },
     },
@@ -213,6 +214,7 @@ export const getConversations = asyncHandler(async (req, res) => {
     name: r.conversation?.name ?? null,
     avatarURL: r.conversation?.avatarURL ?? null,
     description: r.conversation?.description ?? null,
+    creatorId: r.conversation?.creatorId ?? null,
   }));
 
   return res
@@ -234,7 +236,7 @@ export const getMessages = asyncHandler(async (req, res) => {
   const nowBucket = Math.floor(Date.now() / dayMs);
 
   const messages: any[] = [];
-  const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30); 
+  const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30);
 
   const query = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
@@ -419,7 +421,7 @@ export const groupUpdate = asyncHandler(async (req, res) => {
   if (groupName !== undefined) updateData.name = groupName;
   if (avatarURL !== undefined) updateData.avatarURL = avatarURL;
   if (description !== undefined) updateData.description = description;
-  
+
   await prisma.conversation.update({
     where: { id: convoId },
     data: updateData,
