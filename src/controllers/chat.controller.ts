@@ -37,7 +37,6 @@ export const createDirectChat = asyncHandler(async (req, res) => {
           creator: {
             connect: { id: creatorID },
           },
-          participants: { create: participants.map((id) => ({ userId: id, })), },
         },
       });
       await tx.conversationParticipant.createMany({
@@ -109,7 +108,6 @@ export const createGroupChat = asyncHandler(async (req, res) => {
         creatorId: creatorID,
         avatarURL: avatarURL ?? null,
         description: description ?? null,
-        participants: { create: uniqueParticipants.map((id) => ({ userId: id, })), },
       },
     });
     await tx.conversationParticipant.createMany({
@@ -500,13 +498,6 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
         convoId,
         userId,
       },
-    },
-  });
-
-  await prisma.conversation.update({
-    where: { id: convoId },
-    data: {
-      participants: { create: newUserIds.map((id: string) => ({ userId: id, })), },
     },
   });
 
