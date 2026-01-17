@@ -180,6 +180,8 @@ export const getConversations = asyncHandler(async (req, res) => {
       lastOpenedAt: true,
       isPinned: true,
       isArchived: true,
+      isActive: true,
+      leftAt: true,
 
       conversation: {
         select: {
@@ -204,6 +206,8 @@ export const getConversations = asyncHandler(async (req, res) => {
     isPinned: r.isPinned,
     isArchived: r.isArchived,
     participants: r.conversation?.participants?.map((p) => p.userId) ?? [],
+    isActive: r.isActive,
+    leftAt: r.leftAt,
   }));
 
   return res
