@@ -37,6 +37,7 @@ export const createDirectChat = asyncHandler(async (req, res) => {
           creator: {
             connect: { id: creatorID },
           },
+          participants: { create: participants.map((id) => ({ userId: id, })), },
         },
       });
       await tx.conversationParticipant.createMany({
@@ -108,6 +109,7 @@ export const createGroupChat = asyncHandler(async (req, res) => {
         creatorId: creatorID,
         avatarURL: avatarURL ?? null,
         description: description ?? null,
+        participants: { create: uniqueParticipants.map((id) => ({ userId: id, })), },
       },
     });
     await tx.conversationParticipant.createMany({
@@ -178,6 +180,8 @@ export const getConversations = asyncHandler(async (req, res) => {
       lastOpenedAt: true,
       isPinned: true,
       isArchived: true,
+      isActive: true,
+      leftAt: true,
 
       conversation: {
         select: {
@@ -202,6 +206,8 @@ export const getConversations = asyncHandler(async (req, res) => {
     isPinned: r.isPinned,
     isArchived: r.isArchived,
     participants: r.conversation?.participants?.map((p) => p.userId) ?? [],
+    isActive: r.isActive,
+    leftAt: r.leftAt,
   }));
 
   return res
@@ -497,6 +503,13 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     },
   });
 
+  await prisma.conversation.update({
+    where: { id: convoId },
+    data: {
+      participants: { create: newUserIds.map((id: string) => ({ userId: id, })), },
+    },
+  });
+
   if (!participant || participant.role !== "admin") {
     throw new apiError(403, "Only group admins can add new users");
   }
@@ -546,5 +559,61 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   );
   return res.status(200).json(
     new apiResponse(200, { usersAdded: usersToAdd }, "Users added to group")
+  );
+});
+
+export const kickUserFromGroup = asyncHandler(async (req, res) => {
+  const { convoId, userIdToKick } = req.body;
+  const userId = req.user!.id;
+  if (!convoId || !userIdToKick) {
+    throw new apiError(400, "Invalid request data");
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+  });
+  if (!convo || convo.type !== "group") {
+    throw new apiError(404, "Group conversation not found");
+  }
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId,
+      },
+    },
+  });
+  if (!participant || participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can kick users");
+  }
+  const userToKick = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId: userIdToKick,
+      },
+    },
+  })
+  if (!userToKick) {
+    throw new apiError(404, "User to kick not found in group");
+  }
+  await prisma.$transaction([
+    prisma.conversationParticipant.delete({
+      where: {
+        convoId_userId: { convoId, userId: userIdToKick }
+      }
+    }),
+    prisma.conversationByUser.update({
+      where: {
+        userId_convoId: { userId: userIdToKick, convoId }
+      },
+      data: {
+        isActive: false,
+        leftAt: new Date()
+      }
+    })
+  ]);
+  await redis.sRem(`convo:${convoId}:participants`, userIdToKick);
+  return res.status(200).json(
+    new apiResponse(200, { userIdKicked: userIdToKick }, "User kicked from group")
   );
 });
