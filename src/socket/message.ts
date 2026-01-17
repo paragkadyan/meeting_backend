@@ -56,6 +56,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
       for (const participantId of participants) {
         if (participantId === userId) continue;
+        io.to(`user:${userId}`).emit('newMessage', message);
 
         const unreadKey = `unread:${participantId}:${convoId}`;
         await redis.hSetNX(unreadKey, 'count', '0');
@@ -77,8 +78,8 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           unreadCount,
         });
       }
-      socket.to(`room:${convoId}`).emit('newMessage', message);
-      //io.to(`user:${userId}`).emit('newMessage', message);
+      //socket.to(`room:${convoId}`).emit('newMessage', message);
+
       socket.emit('messageSent');
 
     } catch (error) {

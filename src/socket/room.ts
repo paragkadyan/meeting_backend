@@ -53,8 +53,8 @@ export const handleRooms = (socket: Socket) => {
     socket.emit('roomUsers', { convoId, onlineUsers });
   });
 
-  socket.on('roomUpdate', async ({ convoId }) => {
-    socket.to(`room:${convoId}`).emit('roomUpdated');
+  socket.on('roomUpdate', async ({ convoId, data }) => {
+    socket.to(`room:${convoId}`).emit('roomUpdated', data);
   });
 
   socket.on('newMembersAdded', async ({ convoId, newMember }) => {

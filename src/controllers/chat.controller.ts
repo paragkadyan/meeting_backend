@@ -307,13 +307,26 @@ export const getUsersBatch = asyncHandler(async (req, res) => {
 
 
 export const userLastSeen = asyncHandler(async (req, res) => {
-  const { userId } = req.body;
-  if (!userId) {
-    throw new apiError(400, "userId is required");
+  const { userIds } = req.body;
+
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    throw new apiError(400, "userIds is required");
   }
-  const lastSeen = await redis.get(`user:lastSeen:${userId}`);
+
+  const keys = userIds.map((id: string) => `user:lastSeen:${id}`);
+  const values = await redis.mGet(keys);
+
+  const data = userIds.reduce<Record<string, string | null>>(
+    (acc, userId, index) => {
+      const value = values[index];
+      acc[userId] = value ? new Date(Number(value)).toISOString() : null;
+      return acc;
+    },
+    {}
+  );
+
   return res.status(200).json(
-    new apiResponse(200, { userId, lastSeen: lastSeen ? new Date(parseInt(lastSeen)) : null }, "User last seen fetched")
+    new apiResponse(200, data, "User last seen fetched")
   );
 });
 
