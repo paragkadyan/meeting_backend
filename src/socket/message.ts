@@ -56,7 +56,6 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       
       const uniqueParticipants = Array.from(new Set(participants.map(p => String(p))));
       for (const participantId of uniqueParticipants) {
-        if (String(participantId) === String(userId)) continue;
         io.to(`user:${participantId}`).emit('newMessage', {...message,messageId: messageId.toString(),});
         const unreadKey = `unread:${participantId}:${convoId}`;
         await redis.hSetNX(unreadKey, 'count', '0');
