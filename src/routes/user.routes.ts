@@ -26,7 +26,7 @@ router.route('/get-messages').post(
     authMiddleware, getMessages
 );
 
-router.route('/last-seen').get(
+router.route('/last-seen').post(
     authMiddleware, userLastSeen
 );
 
