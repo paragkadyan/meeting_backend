@@ -69,9 +69,10 @@ CREATE TABLE message_reads (
 CREATE TABLE message_reactions (
   convoID UUID,
   messageID TIMEUUID,
-  reaction TEXT,                 -- '👍', '❤️', '😂'
   userID UUID,
+  reaction TEXT,
   reactedAt TIMESTAMP,
-  PRIMARY KEY ((convoID, messageID, reaction), userID)
+  PRIMARY KEY ((convoID, messageID), userID)
 );
+
 

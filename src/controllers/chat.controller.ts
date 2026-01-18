@@ -235,7 +235,7 @@ export const getMessages = asyncHandler(async (req, res) => {
   const dayMs = 24 * 60 * 60 * 1000;
   const nowBucket = Math.floor(Date.now() / dayMs);
 
-  const messages: any[] = [];
+  const msgs: any[] = [];
   const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30);
 
   const query = `
@@ -247,11 +247,11 @@ export const getMessages = asyncHandler(async (req, res) => {
     LIMIT ?;
   `;
 
-  for (let i = 0; i < lookbackDays && messages.length < limit; i++) {
+  for (let i = 0; i < lookbackDays && msgs.length < limit; i++) {
     const bucket = nowBucket - i;
     if (bucket < 0) break;
 
-    const remaining = limit - messages.length;
+    const remaining = limit - msgs.length;
 
     const result = await cassandra.execute(
       query,
@@ -260,18 +260,67 @@ export const getMessages = asyncHandler(async (req, res) => {
     );
     for (const row of result.rows) {
       if (!row.isdeleted) {
-        messages.push(row);
-        if (messages.length === limit) break;
+        msgs.push(row);
+        if (msgs.length === limit) break;
       }
     }
   }
 
-  messages.sort((a, b) => {
+  msgs.sort((a, b) => {
     return b.messageid.getDate().getTime() - a.messageid.getDate().getTime();
   });
 
+   const reactionQuery = `
+    SELECT messageID, reaction, userID
+    FROM message_reactions
+    WHERE convoID = ?
+      AND messageID = ?;
+  `;
+
+  const reactionMap = new Map<string,Record<string, string[]>>();
+
+  await Promise.all(
+    msgs.map(async (msg) => {
+      const result = await cassandra.execute(
+        reactionQuery,
+        [convoId, msg.messageid],
+        { prepare: true }
+      );
+
+      if (!reactionMap.has(msg.messageid.toString())) {
+        reactionMap.set(msg.messageid.toString(), {});
+      }
+
+      const reactions = reactionMap.get(msg.messageid.toString())!;
+
+      for (const row of result.rows) {
+        if (!reactions[row.reaction]) {
+          reactions[row.reaction] = [];
+        }
+        reactions[row.reaction].push(row.userid.toString());
+      }
+    })
+  );
+
+  const messages = msgs.map((msg) => ({
+    messageId: msg.messageid.toString(),
+    convoId: msg.convoid.toString(),
+    senderId: msg.senderid.toString(),
+    content: msg.content,
+    messageType: msg.messagetype,
+    attachments: msg.attachments,
+    replyToMessageId: msg.replytomessageid,
+    isEdited: msg.isedited,
+    editedAt: msg.editedat,
+    isDeleted: msg.isdeleted,
+    deletedAt: msg.deletedat,
+    createdAt: msg.createdat,
+    reactions: reactionMap.get(msg.messageid.toString()) || {},
+  }));
+
+
   return res.status(200).json(
-    new apiResponse(200, messages.slice(0, limit), "Messages fetched")
+    new apiResponse(200, messages, "Messages fetched")
   );
 });
 
@@ -396,6 +445,35 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
       if (remaining === 0) break;
     }
   }
+
+   const reactionsQuery = `
+    SELECT reaction, userID
+    FROM message_reactions
+    WHERE convoID = ?
+      AND messageID = ?;
+  `;
+
+  await Promise.all(
+    messages.map(async (msg) => {
+      const result = await cassandra.execute(
+        reactionsQuery,
+        [convoId, msg.messageid],
+        { prepare: true }
+      );
+
+      const reactions: Record<string, string[]> = {};
+
+      for (const row of result.rows) {
+        if (!reactions[row.reaction]) {
+          reactions[row.reaction] = [];
+        }
+        reactions[row.reaction].push(row.userid.toString());
+      }
+
+      msg.reactions = reactions;
+    })
+  );
+
 
   messages.sort(
     (a, b) =>

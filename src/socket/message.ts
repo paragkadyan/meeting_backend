@@ -53,11 +53,11 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       if (!participants || !Array.isArray(participants)) {
         return;
       }
-
-      for (const participantId of participants) {
-        if (participantId === userId) continue;
-        io.to(`user:${userId}`).emit('newMessage', message);
-
+      
+      const uniqueParticipants = Array.from(new Set(participants.map(p => String(p))));
+      for (const participantId of uniqueParticipants) {
+        if (String(participantId) === String(userId)) continue;
+        io.to(`user:${participantId}`).emit('newMessage', {...message,messageId: messageId.toString(),});
         const unreadKey = `unread:${participantId}:${convoId}`;
         await redis.hSetNX(unreadKey, 'count', '0');
         const unreadCount = await redis.hIncrBy(unreadKey, 'count', 1);
@@ -165,6 +165,36 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       socket.emit('error', { message: 'Failed to mark messages as read' });
     }
   });
+
+  socket.on("messageRead",async ({convoId,messageId,}) => {
+    try {
+      if (!convoId || !messageId) return;
+
+      const readAt = new Date();
+
+      const insertQuery = `
+        INSERT INTO message_reads (convoID, messageID, userID, readAt)
+        VALUES (?, ?, ?, ?)
+        IF NOT EXISTS;
+      `;
+
+      await cassandra.execute(
+        insertQuery,
+        [convoId, messageId, userId, readAt],
+        { prepare: true }
+      );
+
+      socket.to(`room:${convoId}`).emit("msgRead", {
+        convoId,
+        messageId,
+        userId,
+        readAt: readAt.toISOString(),
+      });
+    } catch (error) {
+      console.error("messageRead error:", error);
+    }
+  }
+);
 
   socket.on('typing', ({ convoId, isTyping }) => {
     socket.to(`room:${convoId}`).emit('typing', {
