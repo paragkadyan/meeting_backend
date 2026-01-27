@@ -37,10 +37,7 @@ export const handleRooms = (socket: Socket) => {
       }
     }
 
-    socket.to(`room:${convoId}`).emit('onlineMembers', {
-      convoId,
-      onlineMembers,
-    });
+    socket.emit('onlineMembers', { convoId, onlineMembers });
   });
 
   socket.on('leaveRoom', async ({ convoId }) => {
