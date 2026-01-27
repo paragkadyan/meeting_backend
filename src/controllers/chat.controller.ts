@@ -156,6 +156,7 @@ type ConversationDTO = {
   isPinned: boolean;
   isArchived: boolean;
   participants?: string[];
+
 };
 
 export const getConversations = asyncHandler(async (req, res) => {
@@ -240,7 +241,7 @@ export const getMessages = asyncHandler(async (req, res) => {
 
   const query = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID 
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -316,6 +317,9 @@ export const getMessages = asyncHandler(async (req, res) => {
     deletedAt: msg.deletedat,
     createdAt: msg.createdat,
     reactions: reactionMap.get(msg.messageid.toString()) || {},
+    systemType: msg.systemtype,
+    actorId: msg.actorid ? msg.actorid.toString() : null,
+    targetUserId: msg.targetuserid ? msg.targetuserid.toString() : null,
   }));
 
 
@@ -395,7 +399,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
   const sameBucketQuery = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -405,7 +409,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
   const olderBucketQuery = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,  toTimestamp(messageID) AS createdat
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,  toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -706,5 +710,35 @@ export const kickUserFromGroup = asyncHandler(async (req, res) => {
   await redis.sRem(`convo:${convoId}:participants`, userIdToKick);
   return res.status(200).json(
     new apiResponse(200, { userIdKicked: userIdToKick }, "User kicked from group")
+  );
+});
+
+export const getMessageReadReceipts = asyncHandler(async (req, res) => {
+  const { messageId } = req.body;
+  const { convoId } = req.body;
+
+  if (!messageId || !convoId) {
+    throw new apiError(400, "messageId and convoId are required");
+  }
+
+  const query = `
+    SELECT userID, readAt
+    FROM message_reads
+    WHERE convoID = ? AND messageID = ?
+  `;
+
+  const result = await cassandra.execute(
+    query,
+    [convoId, messageId],
+    { prepare: true }
+  );
+
+  const readReceipts = result.rows.map(row => ({
+    userId: row.userid,
+    readAt: row.readat
+  }));
+
+  return res.status(200).json(
+    new apiResponse(200, readReceipts, "Message read receipts fetched")
   );
 });

@@ -53,28 +53,28 @@ model User {
 
 model Feedback {
   id       String   @id @default(uuid())
-  userID   String
+  userId   String
   title    String
   details  String
   timestamp DateTime @default(now())
 
   //Relations
-  user User @relation(fields: [userID], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userID])
+  @@index([userId])
 }
 
 model Payment {
   id        String   @id @default(uuid())
-  userID    String   
+  userId    String   
   startTime DateTime?
   endTime   DateTime?
   timestamp DateTime @default(now())
 
 
-  user      User     @relation(fields: [userID], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 
-  @@index([userID])
+  @@index([userId])
 }
 
 model Conversation {

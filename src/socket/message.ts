@@ -7,16 +7,16 @@ import { prisma } from '../db/post';
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
 
-  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null }) => {
+  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, systemType = null, actorId = null, targetUserId = null }) => {
     try {
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
         `INSERT INTO messages (
-          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID
+          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID, systemType, actorID, targetUserID
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [convoId, bucket, messageId, userId, content, messageType, [], null],
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [convoId, bucket, messageId, userId, content, messageType, attachments, replyToMessageID, systemType, actorId, targetUserId],
         { prepare: true }
       );
 
@@ -165,7 +165,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     }
   });
 
-  socket.on("messageRead",async ({convoId,messageId,}) => {
+  socket.on("messageRead",async ({convoId,messageId}) => {
     try {
       if (!convoId || !messageId) return;
 
@@ -192,8 +192,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     } catch (error) {
       console.error("messageRead error:", error);
     }
-  }
-);
+  });
 
   socket.on('typing', ({ convoId, isTyping }) => {
     socket.to(`room:${convoId}`).emit('typing', {
