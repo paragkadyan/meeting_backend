@@ -224,10 +224,28 @@ export const getConversations = asyncHandler(async (req, res) => {
 });
 
 
+const markmessagesAsRead = async (convoId: string, userId: string, messageIds: string[]) => {
+ try {
+    const queries = messageIds.map((messageId) => ({
+      query: `
+        INSERT INTO message_reads (convoID, messageID, userID, readAt)
+        VALUES (?, ?, ?, ?)
+      `,
+      params: [convoId, messageId, userId, new Date()],
+    }));
+    await Promise.all(queries.map(async (q) => {
+      await cassandra.execute(q.query, q.params, { prepare: true });
+    }));
+ } catch (error) {
+   throw new apiError(500, "Failed to mark messages as read");
+ }
+}
+
 
 export const getMessages = asyncHandler(async (req, res) => {
   const { convoId } = req.body;
-  const limit = Math.min(Number(req.query.limit) || 20, 50);
+  const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
+  const limit = Math.max((Number(unreadCount)+10) || 50);
 
   if (!convoId) {
     return res.status(400).json(new apiResponse(400, null, "convoId is required"));
@@ -308,6 +326,7 @@ export const getMessages = asyncHandler(async (req, res) => {
     convoId: msg.convoid.toString(),
     senderId: msg.senderid.toString(),
     content: msg.content,
+    bucket: msg.bucket,
     messageType: msg.messagetype,
     attachments: msg.attachments,
     replyToMessageId: msg.replytomessageid,
@@ -322,6 +341,13 @@ export const getMessages = asyncHandler(async (req, res) => {
     targetUserId: msg.targetuserid ? msg.targetuserid.toString() : null,
   }));
 
+  const messagesToRead = msgs
+  .filter(msg => msg.senderid && msg.senderid.toString() !== req.user!.id.toString())
+  .map(msg => msg.messageid.toString());
+
+  if (Number(unreadCount) > 0) {
+    markmessagesAsRead(convoId, req.user!.id, messagesToRead);
+  }
 
   return res.status(200).json(
     new apiResponse(200, messages, "Messages fetched")
