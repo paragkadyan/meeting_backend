@@ -609,51 +609,96 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     throw new apiError(403, "Only group admins can add new users");
   }
 
+  const convoUsers = await prisma.conversationByUser.findMany({
+    where: { convoId },
+    select: { userId: true, isActive: true },
+  });
+
   const existingParticipants = await prisma.conversationParticipant.findMany({
     where: { convoId },
     select: { userId: true },
   });
 
-  const existingUserIds = new Set(
-    existingParticipants.map((p) => p.userId)
+   const convoUserMap = new Map(
+    convoUsers.map(u => [u.userId, u])
   );
 
-  const usersToAdd = newUserIds.filter(
-    (id) => !existingUserIds.has(id)
+  const activeParticipantIds = new Set(
+    existingParticipants.map(p => p.userId)
   );
 
-  if (usersToAdd.length === 0) {
+  const usersToCreate: string[] = [];
+  const usersToReactivate: string[] = [];
+
+  for (const id of newUserIds) {
+    if (activeParticipantIds.has(id)) continue;
+
+    const convoUser = convoUserMap.get(id);
+
+    if (convoUser && !convoUser.isActive) {
+      usersToReactivate.push(id);
+    } else if (!convoUser) {
+      usersToCreate.push(id);
+    }
+  }
+
+  if (!usersToCreate.length && !usersToReactivate.length) {
     return res.status(200).json(
       new apiResponse(200, null, "Users already in group")
     );
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.conversationParticipant.createMany({
-      data: usersToAdd.map((id) => ({
-        convoId,
-        userId: id,
-        role: "member",
-      })),
-    });
 
-    await tx.conversationByUser.createMany({
-      data: usersToAdd.map((id) => ({
-        userId: id,
-        convoId,
-        convoType: "group",
-        isActive: true,
-        unreadCount: 0,
-      })),
-    });
+    if (usersToReactivate.length) {
+      await tx.conversationParticipant.createMany({
+        data: usersToReactivate.map(id => ({
+          convoId,
+          userId: id,
+          role: "member",
+        })),
+      });
+
+      await tx.conversationByUser.updateMany({
+        where: {
+          convoId,
+          userId: { in: usersToReactivate },
+        },
+        data: {
+          isActive: true,
+          leftAt: null,
+        },
+      });
+    }
+
+    if (usersToCreate.length) {
+      await tx.conversationParticipant.createMany({
+        data: usersToCreate.map(id => ({
+          convoId,
+          userId: id,
+          role: "member",
+        })),
+      });
+
+      await tx.conversationByUser.createMany({
+        data: usersToCreate.map(id => ({
+          userId: id,
+          convoId,
+          convoType: "group",
+          isActive: true,
+          unreadCount: 0,
+        })),
+      });
+    }
   });
 
   await redis.sAdd(
     `convo:${convoId}:participants`,
-    usersToAdd
+    [...usersToCreate, ...usersToReactivate]
   );
+
   return res.status(200).json(
-    new apiResponse(200, { usersAdded: usersToAdd }, "Users added to group")
+    new apiResponse(200, { usersAdded: [...usersToCreate, ...usersToReactivate] }, "Users added to group")
   );
 });
 
