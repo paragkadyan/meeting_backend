@@ -45,7 +45,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         bucket,
         messageType,
         attachments: [],
-        replyToMessageID: null,
+        replyToMessageID,
+        systemType,
+        actorId,
+        targetUserId,
         createdAt: new Date().toISOString(),
       };
 
@@ -53,10 +56,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       if (!participants || !Array.isArray(participants)) {
         return;
       }
-      
+
       const uniqueParticipants = Array.from(new Set(participants.map(p => String(p))));
       for (const participantId of uniqueParticipants) {
-        io.to(`user:${participantId}`).emit('newMessage', {...message,messageId: messageId.toString(),});
+        io.to(`user:${participantId}`).emit('newMessage', { ...message, messageId: messageId.toString(), });
         const unreadKey = `unread:${participantId}:${convoId}`;
         await redis.hSetNX(unreadKey, 'count', '0');
         const unreadCount = await redis.hIncrBy(unreadKey, 'count', 1);
@@ -96,7 +99,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         reaction,
       });
 
-       const existing = await cassandra.execute(
+      const existing = await cassandra.execute(
         `
         SELECT reaction FROM message_reactions
         WHERE convoID = ?
@@ -145,9 +148,9 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         }
       }
     } catch (error) {
-        console.error('Reaction error:', error);
-        socket.emit('error', { message: 'Failed to react to message' });
-      }
+      console.error('Reaction error:', error);
+      socket.emit('error', { message: 'Failed to react to message' });
+    }
   });
 
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
@@ -165,7 +168,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     }
   });
 
-  socket.on("messageRead",async ({convoId,messageId}) => {
+  socket.on("messageRead", async ({ convoId, messageId }) => {
     try {
       if (!convoId || !messageId) return;
 
@@ -218,7 +221,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         SET content = ?, isEdited = true, editedAt = toTimestamp(now())
         WHERE convoID = ? AND bucket = ? AND messageID = ?
         `,
-        [newContent,convoId, bucket, messageId],
+        [newContent, convoId, bucket, messageId],
         { prepare: true }
       );
       io.to(`room:${convoId}`).emit('messageEdited', {
