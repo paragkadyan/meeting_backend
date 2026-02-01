@@ -236,6 +236,14 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
     await Promise.all(queries.map(async (q) => {
       await cassandra.execute(q.query, q.params, { prepare: true });
     }));
+    await redis.set(`convo:${convoId}:user:${userId}:unreadCount`, '0');
+    await prisma.conversationByUser.updateMany({
+      where: {
+        convoId,
+        userId,
+      },
+      data: { unreadCount: 0 },
+    });
  } catch (error) {
    throw new apiError(500, "Failed to mark messages as read");
  }

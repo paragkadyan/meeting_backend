@@ -162,18 +162,6 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         convoId,
         lastMessageId
       });
-    } catch (error) {
-      console.error('Mark read error:', error);
-      socket.emit('error', { message: 'Failed to mark messages as read' });
-    }
-  });
-
-  socket.on("messageRead", async ({ convoId, messageId }) => {
-    try {
-      if (!convoId || !messageId) return;
-
-      const readAt = new Date();
-
       const insertQuery = `
         INSERT INTO message_reads (convoID, messageID, userID, readAt)
         VALUES (?, ?, ?, ?)
@@ -182,18 +170,12 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
       await cassandra.execute(
         insertQuery,
-        [convoId, messageId, userId, readAt],
+        [convoId, lastMessageId, userId,  new Date()],
         { prepare: true }
       );
-
-      socket.to(`room:${convoId}`).emit("msgRead", {
-        convoId,
-        messageId,
-        userId,
-        readAt: readAt.toISOString(),
-      });
     } catch (error) {
-      console.error("messageRead error:", error);
+      console.error('Mark read error:', error);
+      socket.emit('error', { message: 'Failed to mark messages as read' });
     }
   });
 
