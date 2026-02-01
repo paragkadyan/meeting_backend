@@ -6,6 +6,8 @@ import { v4 as uuidv4 } from "uuid";
 import { redis } from "../db/redis";
 import { prisma } from '../db/post';
 
+import cassandraType from 'cassandra-driver';
+
 
 export const createDirectChat = asyncHandler(async (req, res) => {
   const { participants, creatorID } = req.body;
@@ -225,7 +227,7 @@ export const getConversations = asyncHandler(async (req, res) => {
 
 
 const markmessagesAsRead = async (convoId: string, userId: string, messageIds: string[]) => {
- try {
+  try {
     const queries = messageIds.map((messageId) => ({
       query: `
         INSERT INTO message_reads (convoID, messageID, userID, readAt)
@@ -244,16 +246,16 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
       },
       data: { unreadCount: 0 },
     });
- } catch (error) {
-   throw new apiError(500, "Failed to mark messages as read");
- }
+  } catch (error) {
+    throw new apiError(500, "Failed to mark messages as read");
+  }
 }
 
 
 export const getMessages = asyncHandler(async (req, res) => {
   const { convoId } = req.body;
   const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
-  const limit = Math.max((Number(unreadCount)+10) || 50);
+  const limit = Math.max((Number(unreadCount) + 10) || 50);
 
   if (!convoId) {
     return res.status(400).json(new apiResponse(400, null, "convoId is required"));
@@ -297,14 +299,14 @@ export const getMessages = asyncHandler(async (req, res) => {
     return b.messageid.getDate().getTime() - a.messageid.getDate().getTime();
   });
 
-   const reactionQuery = `
+  const reactionQuery = `
     SELECT messageID, reaction, userID
     FROM message_reactions
     WHERE convoID = ?
       AND messageID = ?;
   `;
 
-  const reactionMap = new Map<string,Record<string, string[]>>();
+  const reactionMap = new Map<string, Record<string, string[]>>();
 
   await Promise.all(
     msgs.map(async (msg) => {
@@ -350,8 +352,8 @@ export const getMessages = asyncHandler(async (req, res) => {
   }));
 
   const messagesToRead = msgs
-  .filter(msg => msg.senderid && msg.senderid.toString() !== req.user!.id.toString())
-  .map(msg => msg.messageid.toString());
+    .filter(msg => msg.senderid && msg.senderid.toString() !== req.user!.id.toString())
+    .map(msg => msg.messageid.toString());
 
   if (Number(unreadCount) > 0) {
     markmessagesAsRead(convoId, req.user!.id, messagesToRead);
@@ -427,6 +429,8 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
       .json(new apiResponse(400, null, "Missing pagination params"));
   }
 
+  const messageTimeUuid = cassandraType.types.TimeUuid.fromString(lastMessageId);
+
   const messages: any[] = [];
   let bucket = Number(lastBucket);
   let remaining = limit;
@@ -452,7 +456,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
   const sameBucketResult = await cassandra.execute(
     sameBucketQuery,
-    [convoId, bucket, lastMessageId, remaining],
+    [convoId, bucket, messageTimeUuid, remaining],
     { prepare: true }
   );
 
@@ -484,7 +488,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     }
   }
 
-   const reactionsQuery = `
+  const reactionsQuery = `
     SELECT reaction, userID
     FROM message_reactions
     WHERE convoID = ?
@@ -653,7 +657,7 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     select: { userId: true },
   });
 
-   const convoUserMap = new Map(
+  const convoUserMap = new Map(
     convoUsers.map(u => [u.userId, u])
   );
 
@@ -800,6 +804,8 @@ export const getMessageReadReceipts = asyncHandler(async (req, res) => {
     throw new apiError(400, "messageId and convoId are required");
   }
 
+  const messageTimeUuid = cassandraType.types.TimeUuid.fromString(messageId);
+
   const query = `
     SELECT userID, readAt
     FROM message_reads
@@ -808,7 +814,7 @@ export const getMessageReadReceipts = asyncHandler(async (req, res) => {
 
   const result = await cassandra.execute(
     query,
-    [convoId, messageId],
+    [convoId, messageTimeUuid],
     { prepare: true }
   );
 
