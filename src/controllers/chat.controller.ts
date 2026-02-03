@@ -253,12 +253,12 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
 
 
 export const getMessages = asyncHandler(async (req, res) => {
-  const { convoId } = req.body;
+  const { convoId, receiverId } = req.body;
   const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
   const limit = Math.max((Number(unreadCount) + 10) || 50);
 
-  if (!convoId) {
-    return res.status(400).json(new apiResponse(400, null, "convoId is required"));
+  if (!convoId || !receiverId) {
+    throw new apiError(400, "convoId and receiverId are required");
   }
 
   const dayMs = 24 * 60 * 60 * 1000;
@@ -359,8 +359,10 @@ export const getMessages = asyncHandler(async (req, res) => {
     markmessagesAsRead(convoId, req.user!.id, messagesToRead);
   }
 
+  const lastReadMessageId = await redis.get(`conv:${convoId}:user:${receiverId}:lastRead`);
+
   return res.status(200).json(
-    new apiResponse(200, messages, "Messages fetched")
+    new apiResponse(200, { messages, lastReadMessageId }, "Messages fetched")
   );
 });
 

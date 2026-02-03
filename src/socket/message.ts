@@ -156,6 +156,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
       await redis.del(`unread:${userId}:${convoId}`);
+      await redis.set(`conv:${convoId}:user:${userId}:lastRead`,lastMessageId);
       await prisma.conversationByUser.update({ where: { userId_convoId: { userId, convoId } }, data: { unreadCount: 0, lastOpenedAt: new Date() }, });
       socket.to(`room:${convoId}`).emit('messagesRead', {
         userId,
