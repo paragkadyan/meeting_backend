@@ -251,12 +251,12 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
 
 
 export const getMessages = asyncHandler(async (req, res) => {
-  const { convoId, receiverId } = req.body;
+  const { convoId} = req.body;
   const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
   const limit = Math.max((Number(unreadCount)+10) || 50);
 
-  if (!convoId || !receiverId) {
-    throw new apiError(400, "convoId and receiverId are required");
+  if (!convoId) {
+    throw new apiError(400, "convoId is required");
   }
 
   const dayMs = 24 * 60 * 60 * 1000;
@@ -357,10 +357,8 @@ export const getMessages = asyncHandler(async (req, res) => {
     markmessagesAsRead(convoId, req.user!.id, messagesToRead);
   }
 
-  const lastReadMessageId = await redis.get(`conv:${convoId}:user:${receiverId}:lastRead`);
-
   return res.status(200).json(
-    new apiResponse(200, { messages, lastReadMessageId }, "Messages fetched")
+    new apiResponse(200, messages, "Messages fetched")
   );
 });
 
@@ -821,5 +819,22 @@ export const getMessageReadReceipts = asyncHandler(async (req, res) => {
 
   return res.status(200).json(
     new apiResponse(200, readReceipts, "Message read receipts fetched")
+  );
+});
+
+
+export const lastReadMessageByUser = asyncHandler(async (req, res) => {
+  const { convoId, userIds } = req.body;
+  if (!convoId || !Array.isArray(userIds) || userIds.length === 0) {
+    throw new apiError(400, "convoId and userIds are required");
+  }
+  const lastReadMap: Record<string, string | null> = {};
+
+  await Promise.all(userIds.map(async (userId: string) => {
+    const lastReadMessageId = await redis.get(`convo:${convoId}:user:${userId}:lastRead`);
+    lastReadMap[userId] = lastReadMessageId;
+  }));
+  return res.status(200).json(
+    new apiResponse(200, lastReadMap, "Last read messages fetched")
   );
 });
