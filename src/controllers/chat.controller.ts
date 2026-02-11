@@ -431,9 +431,16 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
   let bucket = Number(lastBucket);
   let remaining = limit;
 
+  const MAX_BUCKET_SCAN = 5;
+  let scannedBuckets = 0;
+
+  const FETCH_MULTIPLIER = 2;
+
   const sameBucketQuery = `
-    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
+    SELECT convoID, bucket, messageID, senderID, content, messageType,
+           attachments, isEdited, editedAt, isDeleted, deletedAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -442,8 +449,10 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
   `;
 
   const olderBucketQuery = `
-    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,  toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
+    SELECT convoID, bucket, messageID, senderID, content, messageType,
+           attachments, isEdited, editedAt, isDeleted, deletedAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -452,7 +461,12 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
   const sameBucketResult = await cassandra.execute(
     sameBucketQuery,
-    [convoId, bucket, lastMessageId, remaining],
+    [
+      convoId,
+      bucket,
+      lastMessageId,
+      remaining * FETCH_MULTIPLIER
+    ],
     { prepare: true }
   );
 
@@ -464,12 +478,17 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     if (remaining === 0) break;
   }
 
-  while (remaining > 0 && bucket > 0) {
+  while (remaining > 0 && bucket > 0 && scannedBuckets < MAX_BUCKET_SCAN) {
     bucket--;
+    scannedBuckets++;
 
     const olderResult = await cassandra.execute(
       olderBucketQuery,
-      [convoId, bucket, remaining],
+      [
+        convoId,
+        bucket,
+        remaining * FETCH_MULTIPLIER
+      ],
       { prepare: true }
     );
 
@@ -484,44 +503,55 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     }
   }
 
-   const reactionsQuery = `
-    SELECT reaction, userID
+  if (messages.length === 0) {
+    return res.status(200).json(
+      new apiResponse(200, [], "Older messages fetched")
+    );
+  }
+
+  const messageIds = messages.map(m => m.messageid);
+
+  const reactionsQuery = `
+    SELECT convoID, messageID, userID, reaction
     FROM message_reactions
     WHERE convoID = ?
-      AND messageID = ?;
+      AND messageID IN ?;
   `;
 
-  await Promise.all(
-    messages.map(async (msg) => {
-      const result = await cassandra.execute(
-        reactionsQuery,
-        [convoId, msg.messageid],
-        { prepare: true }
-      );
+  let reactionsResult = { rows: [] as any[] };
 
-      const reactions: Record<string, string[]> = {};
-
-      for (const row of result.rows) {
-        if (!reactions[row.reaction]) {
-          reactions[row.reaction] = [];
-        }
-        reactions[row.reaction].push(row.userid.toString());
-      }
-
-      msg.reactions = reactions;
-    })
+  reactionsResult = await cassandra.execute(
+    reactionsQuery,
+    [convoId, messageIds],
+    { prepare: true }
   );
 
+  const reactionMap = new Map<string, Record<string, string[]>>();
 
-  messages.sort(
-    (a, b) =>
-      b.messageid.getDate().getTime() - a.messageid.getDate().getTime()
-  );
+  for (const row of reactionsResult.rows) {
+    const msgId = row.messageid.toString();
+    if (!reactionMap.has(msgId)) {
+      reactionMap.set(msgId, {});
+    }
+
+    const msgReactions = reactionMap.get(msgId)!;
+
+    if (!msgReactions[row.reaction]) {
+      msgReactions[row.reaction] = [];
+    }
+
+    msgReactions[row.reaction].push(row.userid.toString());
+  }
+
+  for (const msg of messages) {
+    msg.reactions = reactionMap.get(msg.messageid.toString()) || {};
+  }
 
   return res.status(200).json(
     new apiResponse(200, messages, "Older messages fetched")
   );
 });
+
 
 export const groupUpdate = asyncHandler(async (req, res) => {
   const { convoId, groupName, avatarURL, description } = req.body;
