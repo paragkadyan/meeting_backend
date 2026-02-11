@@ -251,7 +251,7 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
 
 
 export const getMessages = asyncHandler(async (req, res) => {
-  const { convoId} = req.body;
+  const { convoId } = req.body;
   const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
   const limit = Math.max((Number(unreadCount)+10) || 50);
 
@@ -861,7 +861,7 @@ export const lastReadMessageByUser = asyncHandler(async (req, res) => {
   const lastReadMap: Record<string, string | null> = {};
 
   await Promise.all(userIds.map(async (userId: string) => {
-    const lastReadMessageId = await redis.get(`convo:${convoId}:user:${userId}:lastRead`);
+    const lastReadMessageId = await redis.get(`conv:${convoId}:user:${userId}:lastRead`);
     lastReadMap[userId] = lastReadMessageId;
   }));
   return res.status(200).json(
