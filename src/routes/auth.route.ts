@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle, searchUser, inviteUser } from '../controllers/user.controller';
+import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle, searchUser, inviteUser, feedback } from '../controllers/user.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -72,5 +72,10 @@ router.route('/search-user').post(
 router.route('/invite-user').post(
     authMiddleware, inviteUser
 );
+
+router.route('/user-feedback').post(
+    authMiddleware, feedback
+);
+
 
 export default router;

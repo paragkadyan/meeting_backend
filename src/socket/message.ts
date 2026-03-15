@@ -7,16 +7,16 @@ import { prisma } from '../db/post';
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
 
-  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null }) => {
+  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, systemType = null, actorId = null, targetUserId = null }) => {
     try {
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
         `INSERT INTO messages (
-          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID
+          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID, systemType, actorID, targetUserID
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [convoId, bucket, messageId, userId, content, messageType, [], null],
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [convoId, bucket, messageId, userId, content, messageType, attachments, replyToMessageID, systemType, actorId, targetUserId],
         { prepare: true }
       );
 
@@ -45,7 +45,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         bucket,
         messageType,
         attachments: [],
-        replyToMessageID: null,
+        replyToMessageID,
+        systemType,
+        actorId,
+        targetUserId,
         createdAt: new Date().toISOString(),
       };
 
@@ -54,10 +57,9 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         return;
       }
 
-      for (const participantId of participants) {
-        if (participantId === userId) continue;
-        io.to(`user:${userId}`).emit('newMessage', message);
-
+      const uniqueParticipants = Array.from(new Set(participants.map(p => String(p))));
+      for (const participantId of uniqueParticipants) {
+        io.to(`user:${participantId}`).emit('newMessage', { ...message, messageId: messageId.toString(), });
         const unreadKey = `unread:${participantId}:${convoId}`;
         await redis.hSetNX(unreadKey, 'count', '0');
         const unreadCount = await redis.hIncrBy(unreadKey, 'count', 1);
@@ -97,7 +99,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         reaction,
       });
 
-       const existing = await cassandra.execute(
+      const existing = await cassandra.execute(
         `
         SELECT reaction FROM message_reactions
         WHERE convoID = ?
@@ -146,20 +148,32 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         }
       }
     } catch (error) {
-        console.error('Reaction error:', error);
-        socket.emit('error', { message: 'Failed to react to message' });
-      }
+      console.error('Reaction error:', error);
+      socket.emit('error', { message: 'Failed to react to message' });
+    }
   });
 
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
       await redis.del(`unread:${userId}:${convoId}`);
+      await redis.set(`conv:${convoId}:user:${userId}:lastRead`,lastMessageId);
       await prisma.conversationByUser.update({ where: { userId_convoId: { userId, convoId } }, data: { unreadCount: 0, lastOpenedAt: new Date() }, });
       socket.to(`room:${convoId}`).emit('messagesRead', {
         userId,
         convoId,
         lastMessageId
       });
+      const insertQuery = `
+        INSERT INTO message_reads (convoID, messageID, userID, readAt)
+        VALUES (?, ?, ?, ?)
+        IF NOT EXISTS;
+      `;
+
+      await cassandra.execute(
+        insertQuery,
+        [convoId, lastMessageId, userId,  new Date()],
+        { prepare: true }
+      );
     } catch (error) {
       console.error('Mark read error:', error);
       socket.emit('error', { message: 'Failed to mark messages as read' });
@@ -190,7 +204,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         SET content = ?, isEdited = true, editedAt = toTimestamp(now())
         WHERE convoID = ? AND bucket = ? AND messageID = ?
         `,
-        [newContent,convoId, bucket, messageId],
+        [newContent, convoId, bucket, messageId],
         { prepare: true }
       );
       io.to(`room:${convoId}`).emit('messageEdited', {

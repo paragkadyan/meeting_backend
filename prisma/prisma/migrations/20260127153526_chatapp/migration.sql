@@ -28,7 +28,7 @@ CREATE TABLE "User" (
 -- CreateTable
 CREATE TABLE "Feedback" (
     "id" TEXT NOT NULL,
-    "userID" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "details" TEXT NOT NULL,
     "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -39,7 +39,7 @@ CREATE TABLE "Feedback" (
 -- CreateTable
 CREATE TABLE "Payment" (
     "id" TEXT NOT NULL,
-    "userID" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
     "startTime" TIMESTAMP(3),
     "endTime" TIMESTAMP(3),
     "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -84,6 +84,8 @@ CREATE TABLE "ConversationByUser" (
     "lastOpenedAt" TIMESTAMP(3),
     "isPinned" BOOLEAN NOT NULL DEFAULT false,
     "isArchived" BOOLEAN NOT NULL DEFAULT false,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "leftAt" TIMESTAMP(3),
 
     CONSTRAINT "ConversationByUser_pkey" PRIMARY KEY ("userId","convoId")
 );
@@ -116,10 +118,10 @@ CREATE INDEX "User_email_idx" ON "User"("email");
 CREATE INDEX "User_mobileNumber_idx" ON "User"("mobileNumber");
 
 -- CreateIndex
-CREATE INDEX "Feedback_userID_idx" ON "Feedback"("userID");
+CREATE INDEX "Feedback_userId_idx" ON "Feedback"("userId");
 
 -- CreateIndex
-CREATE INDEX "Payment_userID_idx" ON "Payment"("userID");
+CREATE INDEX "Payment_userId_idx" ON "Payment"("userId");
 
 -- CreateIndex
 CREATE INDEX "ConversationByUser_userId_isPinned_lastMessageAt_idx" ON "ConversationByUser"("userId", "isPinned", "lastMessageAt" DESC);
@@ -128,10 +130,10 @@ CREATE INDEX "ConversationByUser_userId_isPinned_lastMessageAt_idx" ON "Conversa
 CREATE UNIQUE INDEX "DirectChatLookup_convoId_key" ON "DirectChatLookup"("convoId");
 
 -- AddForeignKey
-ALTER TABLE "Feedback" ADD CONSTRAINT "Feedback_userID_fkey" FOREIGN KEY ("userID") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Feedback" ADD CONSTRAINT "Feedback_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Payment" ADD CONSTRAINT "Payment_userID_fkey" FOREIGN KEY ("userID") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Payment" ADD CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Conversation" ADD CONSTRAINT "Conversation_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

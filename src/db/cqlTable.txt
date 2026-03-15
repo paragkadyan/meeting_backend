@@ -1,60 +1,28 @@
 CREATE TABLE messages (
   convoID UUID,
-  bucket INT,                    -- Daily bucket (0,1,2...) to prevent hot partitions
+  bucket INT,
   messageID TIMEUUID,
-  senderID UUID,
-  content TEXT,
-  messageType TEXT,               -- 'text', 'image', 'video', 'system'
-  attachments LIST<TEXT>,         -- ['https://...jpg', 'https://...mp4']
+
+  senderID UUID,          -- NULL for system messages
+  content TEXT,           -- Optional for system messages
+
+  messageType TEXT,       -- 'text' | 'image' | 'video' | 'system'
+  systemType TEXT,        -- 'user_joined' | 'user_left' | 'user_added' | 'user_kicked'
+
+  actorId UUID,           -- who performed the action
+  targetUserId UUID,      -- who was affected
+
+  attachments LIST<TEXT>,
   isEdited BOOLEAN,
   editedAt TIMESTAMP,
   isDeleted BOOLEAN,
   deletedAt TIMESTAMP,
-  replyToMessageID TIMEUUID,      -- Threaded replies
+  replyToMessageID TIMEUUID,
+
   PRIMARY KEY ((convoID, bucket), messageID)
-) WITH CLUSTERING ORDER BY (messageID DESC)
-  AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
-  AND compaction = {
-    'class': 'TimeWindowCompactionStrategy',
-    'compaction_window_size': 1,
-    'compaction_window_unit': 'DAYS'
-  }
-  AND gc_grace_seconds = 86400;
+)
+WITH CLUSTERING ORDER BY (messageID DESC);
 
-
-
-
-CREATE TABLE conversations (
-  convoID UUID PRIMARY KEY,
-  name TEXT,
-  type TEXT,              -- 'direct' or 'group'
-  creatorID UUID,
-  participants SET<UUID>,
-  createdAt TIMESTAMP,
-  updatedAt TIMESTAMP,
-  isActive BOOLEAN,
-  avatarURL TEXT,
-  description TEXT,
-  lastMessageID TIMEUUID
-);
-
-
-
-CREATE TABLE chatapp.conversations_by_user (
-    userid uuid,
-    lastmessageat timestamp,
-    convoid uuid,
-    convoname text,
-    convotype text,
-    isarchived boolean,
-    ispinned boolean,
-    lastmessage text,
-    lastmessagesenderid uuid,
-    lastopenedat timestamp,
-    unreadcount int,
-    PRIMARY KEY (userid, lastmessageat, convoid)
-) WITH CLUSTERING ORDER BY (lastmessageat DESC, convoid ASC)
-AND COMPRESSION = {'class': 'org.apache.cassandra.io.compress.LZ4Compressor'};
 
 
 CREATE TABLE message_reads (
@@ -69,9 +37,10 @@ CREATE TABLE message_reads (
 CREATE TABLE message_reactions (
   convoID UUID,
   messageID TIMEUUID,
-  reaction TEXT,                 -- '👍', '❤️', '😂'
   userID UUID,
+  reaction TEXT,
   reactedAt TIMESTAMP,
-  PRIMARY KEY ((convoID, messageID, reaction), userID)
+  PRIMARY KEY ((convoID, messageID), userID)
 );
+
 

@@ -156,6 +156,7 @@ type ConversationDTO = {
   isPinned: boolean;
   isArchived: boolean;
   participants?: string[];
+
 };
 
 export const getConversations = asyncHandler(async (req, res) => {
@@ -223,35 +224,61 @@ export const getConversations = asyncHandler(async (req, res) => {
 });
 
 
+const markmessagesAsRead = async (convoId: string, userId: string, messageIds: string[]) => {
+ try {
+    const queries = messageIds.map((messageId) => ({
+      query: `
+        INSERT INTO message_reads (convoID, messageID, userID, readAt)
+        VALUES (?, ?, ?, ?)
+      `,
+      params: [convoId, messageId, userId, new Date()],
+    }));
+    await Promise.all(queries.map(async (q) => {
+      await cassandra.execute(q.query, q.params, { prepare: true });
+    }));
+    await redis.set(`convo:${convoId}:user:${userId}:unreadCount`, '0');
+    await prisma.conversationByUser.updateMany({
+      where: {
+        convoId,
+        userId,
+      },
+      data: { unreadCount: 0 },
+    });
+ } catch (error) {
+   throw new apiError(500, "Failed to mark messages as read");
+ }
+}
+
 
 export const getMessages = asyncHandler(async (req, res) => {
   const { convoId } = req.body;
-  const limit = Math.min(Number(req.query.limit) || 20, 50);
+  const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
+  const limit = Math.max((Number(unreadCount)+10) || 50);
 
   if (!convoId) {
-    return res.status(400).json(new apiResponse(400, null, "convoId is required"));
+    throw new apiError(400, "convoId is required");
   }
 
   const dayMs = 24 * 60 * 60 * 1000;
   const nowBucket = Math.floor(Date.now() / dayMs);
 
-  const messages: any[] = [];
+  const msgs: any[] = [];
   const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30);
 
   const query = `
     SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat
+           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID 
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
     LIMIT ?;
   `;
 
-  for (let i = 0; i < lookbackDays && messages.length < limit; i++) {
+  for (let i = 0; i < lookbackDays && msgs.length < limit; i++) {
     const bucket = nowBucket - i;
     if (bucket < 0) break;
 
-    const remaining = limit - messages.length;
+    const remaining = limit - msgs.length;
 
     const result = await cassandra.execute(
       query,
@@ -260,18 +287,78 @@ export const getMessages = asyncHandler(async (req, res) => {
     );
     for (const row of result.rows) {
       if (!row.isdeleted) {
-        messages.push(row);
-        if (messages.length === limit) break;
+        msgs.push(row);
+        if (msgs.length === limit) break;
       }
     }
   }
 
-  messages.sort((a, b) => {
+  msgs.sort((a, b) => {
     return b.messageid.getDate().getTime() - a.messageid.getDate().getTime();
   });
 
+   const reactionQuery = `
+    SELECT messageID, reaction, userID
+    FROM message_reactions
+    WHERE convoID = ?
+      AND messageID = ?;
+  `;
+
+  const reactionMap = new Map<string,Record<string, string[]>>();
+
+  await Promise.all(
+    msgs.map(async (msg) => {
+      const result = await cassandra.execute(
+        reactionQuery,
+        [convoId, msg.messageid],
+        { prepare: true }
+      );
+
+      if (!reactionMap.has(msg.messageid.toString())) {
+        reactionMap.set(msg.messageid.toString(), {});
+      }
+
+      const reactions = reactionMap.get(msg.messageid.toString())!;
+
+      for (const row of result.rows) {
+        if (!reactions[row.reaction]) {
+          reactions[row.reaction] = [];
+        }
+        reactions[row.reaction].push(row.userid.toString());
+      }
+    })
+  );
+
+  const messages = msgs.map((msg) => ({
+    messageId: msg.messageid.toString(),
+    convoId: msg.convoid.toString(),
+    senderId: msg.senderid.toString(),
+    content: msg.content,
+    bucket: msg.bucket,
+    messageType: msg.messagetype,
+    attachments: msg.attachments,
+    replyToMessageId: msg.replytomessageid,
+    isEdited: msg.isedited,
+    editedAt: msg.editedat,
+    isDeleted: msg.isdeleted,
+    deletedAt: msg.deletedat,
+    createdAt: msg.createdat,
+    reactions: reactionMap.get(msg.messageid.toString()) || {},
+    systemType: msg.systemtype,
+    actorId: msg.actorid ? msg.actorid.toString() : null,
+    targetUserId: msg.targetuserid ? msg.targetuserid.toString() : null,
+  }));
+
+  const messagesToRead = msgs
+  .filter(msg => msg.senderid && msg.senderid.toString() !== req.user!.id.toString())
+  .map(msg => msg.messageid.toString());
+
+  if (Number(unreadCount) > 0) {
+    markmessagesAsRead(convoId, req.user!.id, messagesToRead);
+  }
+
   return res.status(200).json(
-    new apiResponse(200, messages.slice(0, limit), "Messages fetched")
+    new apiResponse(200, messages, "Messages fetched")
   );
 });
 
@@ -344,9 +431,16 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
   let bucket = Number(lastBucket);
   let remaining = limit;
 
+  const MAX_BUCKET_SCAN = 5;
+  let scannedBuckets = 0;
+
+  const FETCH_MULTIPLIER = 2;
+
   const sameBucketQuery = `
-    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat
+    SELECT convoID, bucket, messageID, senderID, content, messageType,
+           attachments, isEdited, editedAt, isDeleted, deletedAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -355,8 +449,10 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
   `;
 
   const olderBucketQuery = `
-    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,  toTimestamp(messageID) AS createdat
+    SELECT convoID, bucket, messageID, senderID, content, messageType,
+           attachments, isEdited, editedAt, isDeleted, deletedAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
       AND bucket = ?
@@ -365,7 +461,12 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
   const sameBucketResult = await cassandra.execute(
     sameBucketQuery,
-    [convoId, bucket, lastMessageId, remaining],
+    [
+      convoId,
+      bucket,
+      lastMessageId,
+      remaining * FETCH_MULTIPLIER
+    ],
     { prepare: true }
   );
 
@@ -377,12 +478,17 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     if (remaining === 0) break;
   }
 
-  while (remaining > 0 && bucket > 0) {
+  while (remaining > 0 && bucket > 0 && scannedBuckets < MAX_BUCKET_SCAN) {
     bucket--;
+    scannedBuckets++;
 
     const olderResult = await cassandra.execute(
       olderBucketQuery,
-      [convoId, bucket, remaining],
+      [
+        convoId,
+        bucket,
+        remaining * FETCH_MULTIPLIER
+      ],
       { prepare: true }
     );
 
@@ -397,15 +503,55 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     }
   }
 
-  messages.sort(
-    (a, b) =>
-      b.messageid.getDate().getTime() - a.messageid.getDate().getTime()
+  if (messages.length === 0) {
+    return res.status(200).json(
+      new apiResponse(200, [], "Older messages fetched")
+    );
+  }
+
+  const messageIds = messages.map(m => m.messageid);
+
+  const reactionsQuery = `
+    SELECT convoID, messageID, userID, reaction
+    FROM message_reactions
+    WHERE convoID = ?
+      AND messageID IN ?;
+  `;
+
+  let reactionsResult = { rows: [] as any[] };
+
+  reactionsResult = await cassandra.execute(
+    reactionsQuery,
+    [convoId, messageIds],
+    { prepare: true }
   );
+
+  const reactionMap = new Map<string, Record<string, string[]>>();
+
+  for (const row of reactionsResult.rows) {
+    const msgId = row.messageid.toString();
+    if (!reactionMap.has(msgId)) {
+      reactionMap.set(msgId, {});
+    }
+
+    const msgReactions = reactionMap.get(msgId)!;
+
+    if (!msgReactions[row.reaction]) {
+      msgReactions[row.reaction] = [];
+    }
+
+    msgReactions[row.reaction].push(row.userid.toString());
+  }
+
+  for (const msg of messages) {
+    msg.reactions = reactionMap.get(msg.messageid.toString()) || {};
+  }
 
   return res.status(200).json(
     new apiResponse(200, messages, "Older messages fetched")
   );
 });
+
 
 export const groupUpdate = asyncHandler(async (req, res) => {
   const { convoId, groupName, avatarURL, description } = req.body;
@@ -527,51 +673,96 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     throw new apiError(403, "Only group admins can add new users");
   }
 
+  const convoUsers = await prisma.conversationByUser.findMany({
+    where: { convoId },
+    select: { userId: true, isActive: true },
+  });
+
   const existingParticipants = await prisma.conversationParticipant.findMany({
     where: { convoId },
     select: { userId: true },
   });
 
-  const existingUserIds = new Set(
-    existingParticipants.map((p) => p.userId)
+   const convoUserMap = new Map(
+    convoUsers.map(u => [u.userId, u])
   );
 
-  const usersToAdd = newUserIds.filter(
-    (id) => !existingUserIds.has(id)
+  const activeParticipantIds = new Set(
+    existingParticipants.map(p => p.userId)
   );
 
-  if (usersToAdd.length === 0) {
+  const usersToCreate: string[] = [];
+  const usersToReactivate: string[] = [];
+
+  for (const id of newUserIds) {
+    if (activeParticipantIds.has(id)) continue;
+
+    const convoUser = convoUserMap.get(id);
+
+    if (convoUser && !convoUser.isActive) {
+      usersToReactivate.push(id);
+    } else if (!convoUser) {
+      usersToCreate.push(id);
+    }
+  }
+
+  if (!usersToCreate.length && !usersToReactivate.length) {
     return res.status(200).json(
       new apiResponse(200, null, "Users already in group")
     );
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.conversationParticipant.createMany({
-      data: usersToAdd.map((id) => ({
-        convoId,
-        userId: id,
-        role: "member",
-      })),
-    });
 
-    await tx.conversationByUser.createMany({
-      data: usersToAdd.map((id) => ({
-        userId: id,
-        convoId,
-        convoType: "group",
-        isActive: true,
-        unreadCount: 0,
-      })),
-    });
+    if (usersToReactivate.length) {
+      await tx.conversationParticipant.createMany({
+        data: usersToReactivate.map(id => ({
+          convoId,
+          userId: id,
+          role: "member",
+        })),
+      });
+
+      await tx.conversationByUser.updateMany({
+        where: {
+          convoId,
+          userId: { in: usersToReactivate },
+        },
+        data: {
+          isActive: true,
+          leftAt: null,
+        },
+      });
+    }
+
+    if (usersToCreate.length) {
+      await tx.conversationParticipant.createMany({
+        data: usersToCreate.map(id => ({
+          convoId,
+          userId: id,
+          role: "member",
+        })),
+      });
+
+      await tx.conversationByUser.createMany({
+        data: usersToCreate.map(id => ({
+          userId: id,
+          convoId,
+          convoType: "group",
+          isActive: true,
+          unreadCount: 0,
+        })),
+      });
+    }
   });
 
   await redis.sAdd(
     `convo:${convoId}:participants`,
-    usersToAdd
+    [...usersToCreate, ...usersToReactivate]
   );
+
   return res.status(200).json(
-    new apiResponse(200, { usersAdded: usersToAdd }, "Users added to group")
+    new apiResponse(200, { usersAdded: [...usersToCreate, ...usersToReactivate] }, "Users added to group")
   );
 });
 
@@ -628,5 +819,52 @@ export const kickUserFromGroup = asyncHandler(async (req, res) => {
   await redis.sRem(`convo:${convoId}:participants`, userIdToKick);
   return res.status(200).json(
     new apiResponse(200, { userIdKicked: userIdToKick }, "User kicked from group")
+  );
+});
+
+export const getMessageReadReceipts = asyncHandler(async (req, res) => {
+  const { messageId } = req.body;
+  const { convoId } = req.body;
+
+  if (!messageId || !convoId) {
+    throw new apiError(400, "messageId and convoId are required");
+  }
+
+  const query = `
+    SELECT userID, readAt
+    FROM message_reads
+    WHERE convoID = ? AND messageID = ?
+  `;
+
+  const result = await cassandra.execute(
+    query,
+    [convoId, messageId],
+    { prepare: true }
+  );
+
+  const readReceipts = result.rows.map(row => ({
+    userId: row.userid,
+    readAt: row.readat
+  }));
+
+  return res.status(200).json(
+    new apiResponse(200, readReceipts, "Message read receipts fetched")
+  );
+});
+
+
+export const lastReadMessageByUser = asyncHandler(async (req, res) => {
+  const { convoId, userIds } = req.body;
+  if (!convoId || !Array.isArray(userIds) || userIds.length === 0) {
+    throw new apiError(400, "convoId and userIds are required");
+  }
+  const lastReadMap: Record<string, string | null> = {};
+
+  await Promise.all(userIds.map(async (userId: string) => {
+    const lastReadMessageId = await redis.get(`conv:${convoId}:user:${userId}:lastRead`);
+    lastReadMap[userId] = lastReadMessageId;
+  }));
+  return res.status(200).json(
+    new apiResponse(200, lastReadMap, "Last read messages fetched")
   );
 });

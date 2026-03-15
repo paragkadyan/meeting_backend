@@ -511,3 +511,22 @@ export const searchUser = asyncHandler(async (req: Request, res: Response) => {
   }, 'Users fetched successfully.');
   return res.status(200).json(response);
 });
+
+export const feedback = asyncHandler(async (req: Request, res: Response) => {
+  const userID = req.user?.id;
+  const { title, details } = req.body;
+  if (!title || !details) {
+    throw new apiError(400, 'Subject and message are required for feedback.');
+  }
+  const id = uuidv4();
+  await prisma.feedback.create({
+    data: {
+      id,
+      userId: userID!,
+      title,
+      details,
+    },
+  });
+  const response = new apiResponse(200, {}, 'Feedback submitted successfully.');
+  return res.status(200).json(response);
+});

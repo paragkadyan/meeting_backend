@@ -7,7 +7,7 @@ import { handleMessages } from "./message";
 import { handleOfflineSync } from "./offline";
 import { socketAuth } from "../middleware/socket.auth";
 
-export const initSocket = (httpServer: import("http").Server) => {
+export const initSocket = async (httpServer: import("http").Server) => {
   const io = new Server(httpServer, {
     cors: {
       origin: process.env.FRONTEND_ORIGIN,
@@ -16,9 +16,12 @@ export const initSocket = (httpServer: import("http").Server) => {
   });
 
   console.log("Socket.io initialized");
-  // const pub = redis;
-  // const sub = redis.duplicate();
-  // io.adapter(createAdapter(pub, sub));
+  const pub = redis;
+  const sub = redis.duplicate();
+  if (!sub.isOpen) {
+    await sub.connect();
+  }
+  io.adapter(createAdapter(pub, sub));
 
   io.use(socketAuth);
 
@@ -33,12 +36,12 @@ export const initSocket = (httpServer: import("http").Server) => {
     handleOfflineSync(socket);
   });
 
-  // process.on("SIGINT", async () => {
-  //   await pub.quit();
-  //   await sub.quit();
-  //   io.close();
-  //   process.exit(0);
-  // });
+  process.on("SIGINT", async () => {
+    await pub.quit();
+    await sub.quit();
+    io.close();
+    process.exit(0);
+  });
 
   return io;
 };
