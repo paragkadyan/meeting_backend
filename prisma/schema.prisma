@@ -139,3 +139,19 @@ model DirectChatLookup {
   convoId   String   @unique
   createdAt DateTime @default(now())
 }
+
+model MediaFile {
+  id        String   @id @db.Uuid
+  fileName  String   @map("file_name")
+  objectKey String   @unique @map("object_key")
+  fileType  String   @map("file_type")
+  mimeType  String   @map("mime_type")
+  size      BigInt
+  chatId    String   @map("chat_id") @db.Uuid
+  senderId  String   @map("sender_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([chatId], map: "idx_media_files_chat_id")
+  @@index([fileName], map: "idx_media_files_file_name")
+  @@map("media_files")
+}
