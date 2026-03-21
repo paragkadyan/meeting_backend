@@ -40,7 +40,7 @@ export const getFileByIdController = asyncHandler(async (req: Request, res: Resp
   }
 
   const presignedUrl = await resolveSecureFileAccess(req.params.id, req.user.id);
-  res.redirect(302, presignedUrl);
+  res.status(200).json({ success: true, data: { presignedUrl } });
 });
 
 export const getBatchFilesController = asyncHandler(async (req: Request, res: Response) => {
