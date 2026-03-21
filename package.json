@@ -22,9 +22,16 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
     "google-auth-library": "^10.5.0",
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
+<<<<<<< HEAD
+=======
+    "minio": "^8.0.6",
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.11",
+>>>>>>> c6324c888fc649232c433f938fcaf860f2c0059a
     "pg": "^8.16.3",
     "redis": "^5.9.0",
     "resend": "^6.0.2",
