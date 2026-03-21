@@ -15,6 +15,11 @@ interface UploadPayload {
 }
 
 export async function uploadMedia(payload: UploadPayload): Promise<{ fileId: string; proxyUrl: string }> {
+  const isParticipant = await isUserInChat(payload.chatId, payload.senderId);
+  if (!isParticipant) {
+    throw new apiError(403, "You are not a participant of this conversation");
+  }
+
   const folder = resolveMediaFolder(payload.mimeType);
   const fileId = uuidv4();
   const extension = payload.originalName.includes(".")
