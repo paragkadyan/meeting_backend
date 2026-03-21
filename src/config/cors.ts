@@ -2,11 +2,7 @@ import { CorsOptions } from 'cors';
 import { FRONTEND_ORIGIN } from './env';
 
 
-const allowedOrigins = [
-    "https://heyllow.netlify.app",
-    "https://preview--sleek-commune.lovable.app",
-    "http://localhost:8080"
-];
+const allowedOrigins = FRONTEND_ORIGIN;
 
 export const corsOptions: CorsOptions = {
     origin: allowedOrigins,
