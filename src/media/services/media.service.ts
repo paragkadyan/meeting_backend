@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
-import { createMediaRecord, getMediaById, getMediaByIds, MediaRecord } from "../repositories/media.repository";
-import { resolveMediaFolder } from "../utils/fileType";
-import { uploadObject, getPresignedGetUrl } from "./storage.service";
+import { createMediaRecord, deleteMediaById, getMediaById, getMediaByIds, MediaRecord } from "../repositories/media.repository";
+import { resolveMediaFolder, validateUploadSize } from "../utils/fileType";
+import { deleteObject, uploadObject, getPresignedGetUrl } from "./storage.service";
 import { isUserInChat } from "../repositories/chat.repository";
 import { apiError } from "../../utils/apiError";
 
@@ -18,6 +18,13 @@ export async function uploadMedia(payload: UploadPayload): Promise<{ fileId: str
   const isParticipant = await isUserInChat(payload.chatId, payload.senderId);
   if (!isParticipant) {
     throw new apiError(403, "You are not a participant of this conversation");
+  }
+
+  try {
+    validateUploadSize(payload.mimeType, payload.size);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "File exceeds upload size limit";
+    throw new apiError(400, message);
   }
 
   const folder = resolveMediaFolder(payload.mimeType);
@@ -84,4 +91,19 @@ export async function resolveBatchFileAccess(fileIds: string[], userId: string) 
   );
 
   return urls;
+}
+
+export async function deleteMedia(fileId: string, userId: string): Promise<void> {
+  const media = await getMediaById(fileId);
+  if (!media) {
+    throw new apiError(404, "File not found");
+  }
+
+  const allowed = await isUserInChat(media.chatId, userId);
+  if (!allowed) {
+    throw new apiError(403, "You are not allowed to delete this file");
+  }
+
+  await deleteObject(media.objectKey);
+  await deleteMediaById(fileId);
 }
