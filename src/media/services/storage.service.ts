@@ -11,3 +11,7 @@ export async function uploadObject(objectKey: string, buffer: Buffer, mimeType: 
 export async function getPresignedGetUrl(objectKey: string): Promise<string> {
   return minioClient.presignedGetObject(bucketName, objectKey, PRESIGNED_EXPIRY_SECONDS);
 }
+
+export async function deleteObject(objectKey: string): Promise<void> {
+  await minioClient.removeObject(bucketName, objectKey);
+}

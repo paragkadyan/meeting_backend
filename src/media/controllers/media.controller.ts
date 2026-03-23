@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { apiError } from "../../utils/apiError";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { resolveBatchFileAccess, resolveSecureFileAccess, uploadMedia } from "../services/media.service";
+import { deleteMedia, resolveBatchFileAccess, resolveSecureFileAccess, uploadMedia } from "../services/media.service";
 
 export const uploadFileController = asyncHandler(async (req: Request, res: Response) => {
   const file = req.file;
@@ -61,4 +61,13 @@ export const getBatchFilesController = asyncHandler(async (req: Request, res: Re
 
 export const mediaHealthController = asyncHandler(async (_req: Request, res: Response) => {
   res.status(200).json({ success: true, message: "media service healthy" });
+});
+
+export const deleteFileByIdController = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.id) {
+    throw new apiError(401, "Unauthorized");
+  }
+
+  await deleteMedia(req.params.id, req.user.id);
+  res.status(200).json({ success: true, message: "File deleted successfully" });
 });

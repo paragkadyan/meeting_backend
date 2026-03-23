@@ -66,3 +66,9 @@ export async function getMediaByIds(ids: string[]): Promise<MediaRecord[]> {
     createdAt: row.createdAt,
   }));
 }
+
+export async function deleteMediaById(id: string): Promise<void> {
+  await prisma.mediaFile.delete({
+    where: { id },
+  });
+}
