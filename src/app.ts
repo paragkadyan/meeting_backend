@@ -22,7 +22,7 @@ app.use((req, _res, next) => {
 app.use("/api/auth", authRouter)
 
 app.use("/api/user", userRouter)
-app.use("/", mediaRouter);
+app.use("/api", mediaRouter);
 
 app.use(errorHandler);
 
