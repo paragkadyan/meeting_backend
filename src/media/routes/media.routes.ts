@@ -12,10 +12,10 @@ import { uploadRateLimiter } from "../middleware/uploadRateLimiter.middleware";
 
 const mediaRouter = Router();
 
-mediaRouter.get("/api/health", mediaHealthController);
-mediaRouter.post("/api/upload", mediaAuthMiddleware, uploadRateLimiter, uploadMiddleware.single("file"), uploadFileController);
-mediaRouter.get("/api/file/:id", mediaAuthMiddleware, getFileByIdController);
-mediaRouter.delete("/api/file/:id", mediaAuthMiddleware, deleteFileByIdController);
-mediaRouter.post("/api/files/batch", mediaAuthMiddleware, getBatchFilesController);
+mediaRouter.get("/health", mediaHealthController);
+mediaRouter.post("/upload", mediaAuthMiddleware, uploadRateLimiter, uploadMiddleware.single("file"), uploadFileController);
+mediaRouter.get("/file/:id", mediaAuthMiddleware, getFileByIdController);
+mediaRouter.delete("/file/:id", mediaAuthMiddleware, deleteFileByIdController);
+mediaRouter.post("/files/batch", mediaAuthMiddleware, getBatchFilesController);
 
 export default mediaRouter;
