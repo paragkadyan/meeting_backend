@@ -572,9 +572,9 @@ export const groupUpdate = asyncHandler(async (req, res) => {
   if (!user) {
     throw new apiError(403, "Not a participant of the group");
   }
-  if (convo.creatorId !== userId) {
-    throw new apiError(403, "Only group admin can update the group");
-  }
+  // if (convo.creatorId !== userId) {
+  //   throw new apiError(403, "Only group admin can update the group");
+  // }
 
   const updateData: any = {};
   if (groupName !== undefined) updateData.name = groupName;
@@ -669,9 +669,9 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     },
   });
 
-  if (!participant || participant.role !== "admin") {
-    throw new apiError(403, "Only group admins can add new users");
-  }
+  // if (!participant || participant.role !== "admin") {
+  //   throw new apiError(403, "Only group admins can add new users");
+  // }
 
   const convoUsers = await prisma.conversationByUser.findMany({
     where: { convoId },
@@ -786,9 +786,9 @@ export const kickUserFromGroup = asyncHandler(async (req, res) => {
       },
     },
   });
-  if (!participant || participant.role !== "admin") {
-    throw new apiError(403, "Only group admins can kick users");
-  }
+  // if (!participant || participant.role !== "admin") {
+  //   throw new apiError(403, "Only group admins can kick users");
+  // }
   const userToKick = await prisma.conversationParticipant.findUnique({
     where: {
       convoId_userId: {

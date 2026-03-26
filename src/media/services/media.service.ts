@@ -29,17 +29,18 @@ export async function uploadMedia(payload: UploadPayload): Promise<{ fileId: str
 
   const folder = resolveMediaFolder(payload.mimeType);
   const fileId = uuidv4();
+  const originalFileName = payload.originalName.trim() || `${fileId}.bin`;
   const extension = payload.originalName.includes(".")
     ? payload.originalName.split(".").pop()
     : "bin";
-  const fileName = `${fileId}-${Date.now()}.${extension}`;
-  const objectKey = `${folder}/${fileName}`;
+  const objectFileName = `${fileId}-${Date.now()}.${extension}`;
+  const objectKey = `${folder}/${objectFileName}`;
 
   await uploadObject(objectKey, payload.buffer, payload.mimeType);
 
   const record: MediaRecord = {
     id: fileId,
-    fileName,
+    fileName: originalFileName,
     objectKey,
     fileType: folder,
     mimeType: payload.mimeType,
@@ -68,7 +69,7 @@ export async function resolveSecureFileAccess(fileId: string, userId: string): P
     throw new apiError(403, "You are not allowed to access this file");
   }
 
-  return getPresignedGetUrl(media.objectKey);
+  return getPresignedGetUrl(media.objectKey, media.fileName);
 }
 
 export async function resolveBatchFileAccess(fileIds: string[], userId: string) {
@@ -81,7 +82,7 @@ export async function resolveBatchFileAccess(fileIds: string[], userId: string) 
         return { fileId: media.id, error: "forbidden" };
       }
 
-      const url = await getPresignedGetUrl(media.objectKey);
+      const url = await getPresignedGetUrl(media.objectKey, media.fileName);
       return {
         fileId: media.id,
         proxyUrl: `/file/${media.id}`,
