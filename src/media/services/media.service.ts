@@ -87,6 +87,7 @@ export async function resolveBatchFileAccess(fileIds: string[], userId: string) 
         fileId: media.id,
         proxyUrl: `/file/${media.id}`,
         directUrl: url,
+        filename: media.fileName,
       };
     })
   );
