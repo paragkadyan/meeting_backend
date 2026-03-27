@@ -800,6 +800,9 @@ export const kickUserFromGroup = asyncHandler(async (req, res) => {
   if (!userToKick) {
     throw new apiError(404, "User to kick not found in group");
   }
+  if (userToKick.role === "admin") {
+    throw new apiError(403, "Cannot kick admin");
+  }
   await prisma.$transaction([
     prisma.conversationParticipant.delete({
       where: {
