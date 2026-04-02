@@ -617,6 +617,10 @@ export const groupLeaveByUser = asyncHandler(async (req, res) => {
     }
   });
 
+  if(participant?.role === "admin") {
+    throw new apiError(403, "Group admins cannot leave the group. Please assign another admin before leaving.");
+  }
+
   if (!participant) {
     return res.status(400).json({ message: "Not a group member" });
   }
@@ -869,5 +873,115 @@ export const lastReadMessageByUser = asyncHandler(async (req, res) => {
   }));
   return res.status(200).json(
     new apiResponse(200, lastReadMap, "Last read messages fetched")
+  );
+});
+
+export const assignAdminRole = asyncHandler(async (req, res) => {
+  const { convoId, userIdToPromote } = req.body;
+  const userId = req.user!.id;
+  if (!convoId || !userIdToPromote) {
+    throw new apiError(400, "Invalid request data");
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+  });
+  if (!convo || convo.type !== "group") {
+    throw new apiError(404, "Group conversation not found");
+  }
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId,
+      },
+    },
+  });
+  if (!participant || participant.role !== "admin") {  
+    throw new apiError(403, "Only group admins can assign admin role");
+  }
+  const userToPromote = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId: userIdToPromote,
+      },
+    },
+  });
+  if (!userToPromote) {
+    throw new apiError(404, "User to promote not found in group");
+  }
+  await prisma.conversationParticipant.update({
+    where: {
+      convoId_userId: { convoId, userId: userIdToPromote }
+    },
+    data: {
+      role: "admin"
+    }
+  });
+  return res.status(200).json(
+    new apiResponse(200, { userIdPromoted: userIdToPromote }, "User promoted to admin")
+  );
+});
+
+export const groupLeaveByAdmin = asyncHandler(async (req, res) => {
+  const { convoId } = req.body;
+  const userId = req.user!.id;
+  if (!convoId) {
+    throw new apiError(400, "convoId is required");
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+    select: { type: true }
+  });
+  if (!convo) {
+    throw new apiError(404, "Conversation not found");
+  }
+  if (convo.type !== "group") {
+    throw new apiError(400, "Cannot leave direct chat");
+  }
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId
+      }
+    }
+  });
+  if (!participant) {
+    throw new apiError(404, "Participant not found");
+  }
+    if (participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can leave the group. Please assign another admin before leaving.");
+  }
+  const otherParticipants = await prisma.conversationParticipant.findMany({
+    where: {
+      convoId,
+      userId: { not: userId }
+    }
+  });
+  if (otherParticipants.length === 0) {
+    await prisma.conversation.update({
+      where: { id: convoId },
+      data: { isActive: true }
+    });
+  }
+  await prisma.$transaction([
+    prisma.conversationParticipant.delete({
+      where: {
+          convoId_userId: { convoId, userId }
+      }    }),
+    prisma.conversationByUser.update({
+      where: {
+        userId_convoId: { userId, convoId }
+      },
+      data: {
+        isActive: false,
+        leftAt: new Date()
+      }
+    })
+  ]);
+  await redis.sRem(`convo:${convoId}:participants`, userId);
+  return res.status(200).json(
+    new apiResponse(200, { convoId }, "Left group successfully")
   );
 });

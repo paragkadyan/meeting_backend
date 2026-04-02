@@ -155,3 +155,10 @@ model MediaFile {
   @@index([fileName], map: "idx_media_files_file_name")
   @@map("media_files")
 }
+
+model Admin {
+  id       String   @id @default(uuid())
+  email    String   @unique
+  password String
+  name     String?
+}

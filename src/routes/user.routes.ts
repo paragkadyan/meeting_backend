@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { addNewUsersToGroup, createDirectChat, createGroupChat, getConversations, getMessageReadReceipts, getMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, userLastSeen, } from '../controllers/chat.controller';
+import { addNewUsersToGroup, assignAdminRole, createDirectChat, createGroupChat, getConversations, getMessageReadReceipts, getMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, userLastSeen, } from '../controllers/chat.controller';
 
 
 const router = Router();
@@ -56,6 +56,14 @@ router.route('/message-read-receipts').post(
 
 router.route('/last-read-message').post(
     authMiddleware, lastReadMessageByUser
+);
+
+router.route('/assign-admin').post(
+    authMiddleware, assignAdminRole
+);
+
+router.route('/remove-admin').post(
+    authMiddleware, assignAdminRole
 );
 
 export default router;
