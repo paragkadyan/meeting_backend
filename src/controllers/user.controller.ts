@@ -501,13 +501,37 @@ export const searchUser = asyncHandler(async (req: Request, res: Response) => {
   if (!users) {
     throw new apiError(404, 'User not found');
   }
+  
+  const isblocked = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: users?.id,
+      blockedId: req.user?.id
+    }
+  });
+
+  if (isblocked) {
+    throw new apiError(403, 'You have been blocked by this user.');
+  }
+
+  const blockedUser = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: req.user?.id,
+      blockedId: users?.id
+    }
+  });
+
+  let isBlocked = false;
+  if(blockedUser){
+    isBlocked = true;
+  }
 
   const response = new apiResponse(200, {
     id: users.id,
     name: users.name,
     lname: users.lname,
     email: users.email,
-    profileURL: users.profileURL
+    profileURL: users.profileURL,
+    isBlocked
   }, 'Users fetched successfully.');
   return res.status(200).json(response);
 });

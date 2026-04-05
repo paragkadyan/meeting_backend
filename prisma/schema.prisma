@@ -45,6 +45,8 @@ model User {
   createdConversations Conversation[] @relation("Creator")
   conversations        ConversationParticipant[]
   convoStates          ConversationByUser[]
+  blockedUsers   UserBlock[] @relation("Blocker")
+  blockedByUsers UserBlock[] @relation("Blocked")
 
   @@index([email])
   @@index([mobileNumber])
@@ -161,4 +163,16 @@ model Admin {
   email    String   @unique
   password String
   name     String?
+}
+
+model UserBlock {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
 }

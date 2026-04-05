@@ -21,6 +21,19 @@ export const createDirectChat = asyncHandler(async (req, res) => {
   const [u1, u2] = [...participants].sort();
   const pairKey = `${u1}_${u2}`;
 
+  const isBlocked = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: u1, blockedId: u2 },
+        { blockerId: u2, blockedId: u1 }
+      ]
+    }
+  });
+
+  if (isBlocked) {
+    throw new Error("Cannot send message. User is blocked.");
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.directChatLookup.findUnique({
       where: { pairKey }
@@ -91,9 +104,45 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   if (!groupName || !Array.isArray(participants)) {
     throw new apiError(400, "Invalid group chat data");
   }
+  const blockRelations = await prisma.userBlock.findMany({
+    where: {
+      OR: [
+        {
+          blockerId: req.user!.id,
+          blockedId: { in: participants }
+        },
+        {
+          blockerId: { in: participants },
+          blockedId: req.user!.id
+        }
+      ]
+    },
+    select: {
+      blockerId: true,
+      blockedId: true
+    }
+  });
+
+  const blockedSet = new Set<string>();
+
+  blockRelations.forEach((b) => {
+    if (b.blockerId === req.user!.id) {
+      blockedSet.add(b.blockedId); // you blocked them
+    } else {
+      blockedSet.add(b.blockerId); // they blocked you
+    }
+  });
+
+  const validParticipants = participants.filter(
+    (id) => !blockedSet.has(id)
+  );
+
+  if (validParticipants.length > 0) {
+    throw new Error("Cannot add blocked users to group");
+  }
 
   const uniqueParticipants = Array.from(
-    new Set([...participants, creatorID])
+    new Set([...validParticipants, creatorID])
   );
 
   if (uniqueParticipants.length < 2) {
@@ -162,6 +211,31 @@ type ConversationDTO = {
 export const getConversations = asyncHandler(async (req, res) => {
   const userId = req.user!.id;
 
+  const blockedRelations = await prisma.userBlock.findMany({
+    where: {
+      OR: [
+        { blockerId: userId },
+        { blockedId: userId }
+      ]
+    },
+    select: {
+      blockerId: true,
+      blockedId: true
+    }
+  });
+
+  const blockedUserIds = new Set<string>();
+
+  blockedRelations.forEach((b: { blockerId: string; blockedId: string; }) => {
+    if (b.blockerId === userId) {
+      blockedUserIds.add(b.blockedId);
+    } else {
+      blockedUserIds.add(b.blockerId);
+    }
+  });
+
+
+
   const rows = await prisma.conversationByUser.findMany({
     where: { userId },
     orderBy: [
@@ -198,26 +272,35 @@ export const getConversations = asyncHandler(async (req, res) => {
     },
   });
 
-  const conversations: ConversationDTO[] = rows.map((r) => ({
-    convoId: r.convoId,
-    convoName: r.convoName,
-    convoType: r.convoType,
-    lastMessage: r.lastMessage,
-    lastMessageSenderId: r.lastMessageSenderId,
-    lastMessageAt: r.lastMessageAt,
-    unreadCount: r.unreadCount,
-    lastOpenedAt: r.lastOpenedAt,
-    isPinned: r.isPinned,
-    isArchived: r.isArchived,
-    participants: r.conversation?.participants?.map((p) => p.userId) ?? [],
-    isActive: r.isActive,
-    leftAt: r.leftAt,
-    name: r.conversation?.name ?? null,
-    avatarURL: r.conversation?.avatarURL ?? null,
-    description: r.conversation?.description ?? null,
-    creatorId: r.conversation?.creatorId ?? null,
-  }));
+  const conversations: ConversationDTO[] = rows.map((r) => {
+    const participants = r.conversation?.participants?.map((p) => p.userId) ?? [];
 
+    const isBlocked =
+      r.convoType === "direct" &&
+      participants.some((p) => blockedUserIds.has(p));
+
+    return {
+      convoId: r.convoId,
+      convoName: isBlocked ? "Blocked User" : r.convoName,
+      convoType: r.convoType,
+      lastMessage: r.lastMessage,
+      lastMessageSenderId: r.lastMessageSenderId,
+      lastMessageAt: r.lastMessageAt,
+      unreadCount: r.unreadCount,
+      lastOpenedAt: r.lastOpenedAt,
+      isPinned: r.isPinned,
+      isArchived: r.isArchived,
+      participants,
+
+      isActive: r.isActive,
+      leftAt: r.leftAt,
+
+      name: isBlocked ? "Blocked User" : r.conversation?.name ?? null,
+      avatarURL: isBlocked ? null : r.conversation?.avatarURL ?? null,
+      description: isBlocked ? null : r.conversation?.description ?? null,
+      creatorId: isBlocked ? null : r.conversation?.creatorId ?? null,
+    };
+  });
   return res
     .status(200)
     .json(new apiResponse(200, conversations, "Conversations fetched"));
@@ -664,6 +747,43 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   if (!convo || convo.type !== "group") {
     throw new apiError(404, "Group conversation not found");
   }
+  const blockRelations = await prisma.userBlock.findMany({
+    where: {
+      OR: [
+        {
+          blockerId: req.user!.id,
+          blockedId: { in: newUserIds }
+        },
+        {
+          blockerId: { in: newUserIds },
+          blockedId: req.user!.id
+        }
+      ]
+    },
+    select: {
+      blockerId: true,
+      blockedId: true
+    }
+  });
+
+  const blockedSet = new Set<string>();
+
+  blockRelations.forEach((b) => {
+    if (b.blockerId === req.user!.id) {
+      blockedSet.add(b.blockedId); 
+    } else {
+      blockedSet.add(b.blockerId); 
+    }
+  });
+
+  const validParticipants = newUserIds.filter(
+    (id) => !blockedSet.has(id)
+  );
+
+  if (validParticipants.length > 0) {
+    throw new Error("Cannot add blocked users to group");
+  }
+
   const participant = await prisma.conversationParticipant.findUnique({
     where: {
       convoId_userId: {
@@ -673,9 +793,9 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     },
   });
 
-  // if (!participant || participant.role !== "admin") {
-  //   throw new apiError(403, "Only group admins can add new users");
-  // }
+  if (!participant ) {
+    throw new apiError(403, "Only group members can add new users");
+  }
 
   const convoUsers = await prisma.conversationByUser.findMany({
     where: { convoId },
@@ -698,7 +818,7 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   const usersToCreate: string[] = [];
   const usersToReactivate: string[] = [];
 
-  for (const id of newUserIds) {
+  for (const id of validParticipants) {
     if (activeParticipantIds.has(id)) continue;
 
     const convoUser = convoUserMap.get(id);
