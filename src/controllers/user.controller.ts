@@ -554,3 +554,55 @@ export const feedback = asyncHandler(async (req: Request, res: Response) => {
   const response = new apiResponse(200, {}, 'Feedback submitted successfully.');
   return res.status(200).json(response);
 });
+
+export const blockUser = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  const { blockedUserId } = req.body;
+  if (!blockedUserId) {
+    throw new apiError(400, 'Blocked user ID is required.');
+  }
+  if (userId === blockedUserId) {
+    throw new apiError(400, 'You cannot block yourself.');
+  }
+  const existingBlock = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: userId,
+      blockedId: blockedUserId,
+    },
+  });
+  if (existingBlock) {
+    throw new apiError(400, 'User is already blocked.');
+  }
+  await prisma.userBlock.create({
+    data: {
+      blockerId: userId!,
+      blockedId: blockedUserId,
+    },
+  });
+  const response = new apiResponse(200, {}, 'User blocked successfully.');
+  return res.status(200).json(response);
+} );
+
+export const unblockUser = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  const { blockedUserId } = req.body;
+  if (!blockedUserId) {
+    throw new apiError(400, 'Blocked user ID is required.');
+  }
+  const existingBlock = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: userId,
+      blockedId: blockedUserId,
+    },
+  });
+  if (!existingBlock) {
+    throw new apiError(400, 'User is not blocked.');
+  }
+  await prisma.userBlock.delete({
+    where: {
+      id: existingBlock.id,
+    },
+  });
+  const response = new apiResponse(200, {}, 'User unblocked successfully.');
+  return res.status(200).json(response);
+});

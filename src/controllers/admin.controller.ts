@@ -4,7 +4,7 @@ import { apiResponse } from "../utils/apiResponse";
 import { apiError } from "../utils/apiError";
 import { redis } from "../db/redis";
 import { prisma } from '../db/post';
-import bcrypt from "bcryptjs/umd/types";
+import bcrypt from 'bcryptjs';
 import { COOKIE_SECURE } from "../config/env";
 import { registerRefreshToken } from "../services/token.service";
 import { signAccessToken, signRefreshToken } from "../utils/jwt";

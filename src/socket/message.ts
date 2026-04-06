@@ -27,6 +27,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           lastMessage: content,
           lastMessageSenderId: userId,
           lastMessageAt: new Date(),
+          lastMessageId: messageId.toString(),
         },
       });
 
@@ -207,11 +208,29 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         [newContent, convoId, bucket, messageId],
         { prepare: true }
       );
+
+      const isLast = await prisma.conversationByUser.count({
+        where: {
+          convoId,
+          lastMessageId: messageId
+        }
+      });
+
+      if (isLast > 0) {
+        await prisma.conversationByUser.updateMany({
+          where: { convoId },
+          data: {
+            lastMessage: newContent
+          }
+        });
+      }
+
       io.to(`room:${convoId}`).emit('messageEdited', {
         convoId,
         messageId,
         newContent,
       });
+
     } catch (error) {
       console.error('Edit message error:', error);
       socket.emit('error', { message: 'Failed to edit message' });
@@ -229,10 +248,48 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         [convoId, bucket, messageId],
         { prepare: true }
       );
+
+      const isLast = await prisma.conversationByUser.findFirst({
+        where: {
+          convoId,
+          lastMessageId: messageId
+        }
+      });
+
+      if (isLast) {
+        const result = await cassandra.execute(
+          `
+          SELECT messageID, content, senderID, isDeleted
+          FROM messages
+          WHERE convoID = ? AND bucket = ?
+          ORDER BY messageID DESC
+          LIMIT 20
+          `,
+          [convoId, bucket],
+          { prepare: true }
+        );
+
+        const prevMessage = result.rows.find(
+          (row) => row.messageid !== messageId && !row.isdeleted
+        );
+
+        await prisma.conversationByUser.updateMany({
+          where: { convoId },
+          data: {
+            lastMessage: prevMessage?.content || null,
+            lastMessageSenderId: prevMessage?.senderid || null,
+            lastMessageAt: prevMessage
+              ? new Date(prevMessage.messageid.getDate?.() || Date.now()) 
+              : null,
+            lastMessageId: prevMessage?.messageid || null
+          }
+        });
+      }
       io.to(`room:${convoId}`).emit('messageDeleted', {
         convoId,
         messageId,
       });
+
     } catch (error) {
       console.error('Delete message error:', error);
       socket.emit('error', { message: 'Failed to delete message' });
