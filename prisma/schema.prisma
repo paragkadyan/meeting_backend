@@ -118,6 +118,7 @@ model ConversationByUser {
   lastMessage           String?
   lastMessageSenderId   String?
   lastMessageAt         DateTime?
+  lastMessageId         String?
 
   unreadCount  Int      @default(0)
   lastOpenedAt DateTime?
