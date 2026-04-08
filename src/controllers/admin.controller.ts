@@ -43,7 +43,7 @@ export const getfeedbacks = asyncHandler(async (req, res) => {
 });
 
 export const addUser = asyncHandler(async (req, res) => {
-    const { name, lname, email} = req.body;
+    const { name, lname, email } = req.body;
     if (!name || !lname || !email) {
         return res.status(400).json(new apiError(400, "Name, Last Name and Email are required"));
     }
@@ -81,35 +81,40 @@ export const adminLogin = asyncHandler(async (req, res) => {
     const admin = await prisma.admin.findUnique({
         where: { email },
     });
+    if (!admin) {
+        return res.status(401).json(new apiError(401, "Invalid email or password"));
+    }
+
     const ok = await bcrypt.compare(password, admin.password);
-  if (!ok) throw new apiError(401, 'invalid credentials');
+    if (!ok) throw new apiError(401, 'invalid credentials');
 
+    const accessToken = signAccessToken({ userId: admin.id });
+    const jti = uuidv4();
+    const refreshToken = signRefreshToken({ userId: admin.id, jti });
+    await registerRefreshToken(admin.id, jti);
 
-  const accessToken = signAccessToken({ userId: admin.id });
-  const jti = uuidv4();
-  const refreshToken = signRefreshToken({ userId: admin.id, jti });
-  await registerRefreshToken(admin.id, jti);
+    res.cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: COOKIE_SECURE,
+        sameSite: 'none',
+        maxAge: 15 * 60 * 1000, // 15 min
+        // domain: COOKIE_DOMAIN,
+        path: '/',
+    });
 
-
-  res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: 'none',
-    maxAge: 15 * 60 * 1000, // 15 min
-    // domain: COOKIE_DOMAIN,
-    path: '/',
-  });
-
-
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: 'none',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    // domain: COOKIE_DOMAIN,
-    path: '/',
-  });
+    res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: COOKIE_SECURE,
+        sameSite: 'none',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        // domain: COOKIE_DOMAIN,
+        path: '/',
+    });
     return res.status(200).json(new apiResponse(200, { id: admin.id, email: admin.email, name: admin.name }, "Admin logged in successfully"));
+});
+
+export const adminDashboard = asyncHandler(async (req, res) => {
+    return res.status(200).json(new apiResponse(200, { message: 'Admin dashboard' }, 'Admin dashboard fetched successfully'));
 });
 
 export const changeAdminPassword = asyncHandler(async (req, res) => {
@@ -121,6 +126,9 @@ export const changeAdminPassword = asyncHandler(async (req, res) => {
     const admin = await prisma.admin.findUnique({
         where: { id: adminId },
     });
+    if (!admin) {
+        return res.status(404).json(new apiError(404, "Admin not found"));
+    }
     const ok = await bcrypt.compare(oldPassword, admin.password);
     if (!ok) {
         return res.status(401).json(new apiError(401, "Old password is incorrect"));
@@ -131,6 +139,33 @@ export const changeAdminPassword = asyncHandler(async (req, res) => {
         data: { password: hashedNewPassword },
     });
     return res.status(200).json(new apiResponse(200, {}, "Password changed successfully"));
+});
+
+export const createAdmin = asyncHandler(async (req, res) => {
+    const { name, email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json(new apiError(400, "Email and password are required"));
+    }
+    const existingAdmin = await prisma.admin.findUnique({
+        where: { email },
+    });
+    if (existingAdmin) {
+        return res.status(400).json(new apiError(400, "Admin with this email already exists"));
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newAdmin = await prisma.admin.create({
+        data: {
+            name,
+            email,
+            password: hashedPassword,
+        },
+        select: {
+            id: true,
+            name: true,
+            email: true,
+        },
+    });
+    return res.status(201).json(new apiResponse(201, newAdmin, "Admin created successfully"));
 });
 
 

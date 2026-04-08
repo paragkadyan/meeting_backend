@@ -501,7 +501,7 @@ export const searchUser = asyncHandler(async (req: Request, res: Response) => {
   if (!users) {
     throw new apiError(404, 'User not found');
   }
-  
+
   const isblocked = await prisma.userBlock.findFirst({
     where: {
       blockerId: users?.id,
@@ -521,7 +521,7 @@ export const searchUser = asyncHandler(async (req: Request, res: Response) => {
   });
 
   let isBlocked = false;
-  if(blockedUser){
+  if (blockedUser) {
     isBlocked = true;
   }
 
@@ -581,11 +581,14 @@ export const blockUser = asyncHandler(async (req: Request, res: Response) => {
   });
   const response = new apiResponse(200, {}, 'User blocked successfully.');
   return res.status(200).json(response);
-} );
+});
 
 export const unblockUser = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
   const { blockedUserId } = req.body;
+  if (!userId) {
+    throw new apiError(401, 'Unauthorized');
+  }
   if (!blockedUserId) {
     throw new apiError(400, 'Blocked user ID is required.');
   }
@@ -600,7 +603,10 @@ export const unblockUser = asyncHandler(async (req: Request, res: Response) => {
   }
   await prisma.userBlock.delete({
     where: {
-      id: existingBlock.id,
+      blockerId_blockedId: {
+        blockerId: userId,
+        blockedId: blockedUserId,
+      },
     },
   });
   const response = new apiResponse(200, {}, 'User unblocked successfully.');

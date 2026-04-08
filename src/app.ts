@@ -5,6 +5,7 @@ import { corsOptions } from './config/cors';
 import { errorHandler } from "./middleware/errorHandler.middleware";
 import authRouter from "./routes/auth.route";
 import userRouter from "./routes/user.routes";
+import adminRouter from "./routes/admin.route";
 import mediaRouter from "./media/routes/media.routes";
 import { logger } from "./logger/logger";
 
@@ -20,7 +21,7 @@ app.use((req, _res, next) => {
 });
 
 app.use("/api/auth", authRouter)
-
+app.use("/api/admin", adminRouter)
 app.use("/api/user", userRouter)
 app.use("/api", mediaRouter);
 
