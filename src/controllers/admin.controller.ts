@@ -9,6 +9,7 @@ import { COOKIE_SECURE } from "../config/env";
 import { registerRefreshToken } from "../services/token.service";
 import { signAccessToken, signRefreshToken } from "../utils/jwt";
 import { v4 as uuidv4 } from 'uuid';
+import { sendTemplatedEmail } from "../services/email.service";
 
 export const getAllUsers = asyncHandler(async (req, res) => {
     const users = await prisma.user.findMany({
@@ -70,6 +71,25 @@ export const addUser = asyncHandler(async (req, res) => {
             email: true,
         },
     });
+
+    // Send email with login credentials
+    try {
+        await sendTemplatedEmail({
+            to: email,
+            subject: 'Your Account Has Been Created - Login Credentials',
+            templateName: 'credentials.html',
+            variables: {
+                name: name,
+                email: email,
+                password: generatedPassword,
+                loginUrl: String(process.env.FRONTEND_ORIGIN),
+            },
+        });
+    } catch (emailError) {
+        console.error('Error sending credentials email:', emailError);
+        // Don't fail the user creation if email sending fails
+    }
+
     return res.status(201).json(new apiResponse(201, newUser, "User added successfully"));
 });
 
