@@ -27,7 +27,7 @@ export const handleOfflineSync = async (socket: Socket) => {
 
   socket.on('syncConversations', async () => {
     const convosHash = await redis.hGetAll(`user:${userId}:conversations`);
-    const conversations = Object.values(convosHash).map(v =>JSON.parse(v));
+    const conversations = Object.values(convosHash).map(v => JSON.parse(v as string));
     socket.emit('syncedConversations', {conversations});
   });
 

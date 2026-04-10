@@ -13,6 +13,7 @@ import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
 import { apiResponse } from '../utils/apiResponse';
 import { apiError } from '../utils/apiError';
 import { verifyGoogleToken } from '../utils/googleAuth';
+import { redis } from '../db/redis';
 
 
 export const signup = asyncHandler(async (req: Request, res: Response) => {
@@ -579,6 +580,7 @@ export const blockUser = asyncHandler(async (req: Request, res: Response) => {
       blockedId: blockedUserId,
     },
   });
+  await redis.sadd(`blocked:${userId}`, blockedUserId);
   const response = new apiResponse(200, {}, 'User blocked successfully.');
   return res.status(200).json(response);
 });
@@ -609,6 +611,33 @@ export const unblockUser = asyncHandler(async (req: Request, res: Response) => {
       },
     },
   });
+  await redis.srem(`blocked:${userId}`, blockedUserId);
   const response = new apiResponse(200, {}, 'User unblocked successfully.');
   return res.status(200).json(response);
 });
+
+export const getBlockedUsers = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new apiError(401, 'Unauthorized');
+  }
+  const blockedUsers = await prisma.userBlock.findMany({
+    where: {
+      blockerId: req.user!.id
+    },
+    include: {
+      blocked: {
+        select: {
+          id: true,
+          name: true,
+          lname: true,
+          email: true,
+          profileURL: true
+        }
+      }
+    }
+  });
+  const response = new apiResponse(200, blockedUsers, 'Blocked users fetched successfully.');
+  return res.status(200).json(response);
+});
+

@@ -9,6 +9,22 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
   socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, systemType = null, actorId = null, targetUserId = null }) => {
     try {
+      const participants = await redis.sMembers(`convo:${convoId}:participants`);
+      if (participants.length === 2) {
+        const otherUserId = participants.find((id: string) => id !== userId);
+
+        const [iBlocked, theyBlocked] = await Promise.all([
+          redis.sismember(`blocked:${userId}`, otherUserId),
+          redis.sismember(`blocked:${otherUserId}`, userId),
+        ]);
+
+        if (iBlocked || theyBlocked) {
+          socket.emit("error", {
+            message: "Cannot send message. User is blocked."
+          });
+          return;
+        }
+      }
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
@@ -53,7 +69,6 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         createdAt: new Date().toISOString(),
       };
 
-      const participants = await redis.sMembers(`convo:${convoId}:participants`);
       if (!participants || !Array.isArray(participants)) {
         return;
       }
