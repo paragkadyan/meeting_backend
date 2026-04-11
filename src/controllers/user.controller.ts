@@ -580,7 +580,7 @@ export const blockUser = asyncHandler(async (req: Request, res: Response) => {
       blockedId: blockedUserId,
     },
   });
-  await redis.sadd(`blocked:${userId}`, blockedUserId);
+  await redis.sAdd(`blocked:${userId}`, blockedUserId);
   const response = new apiResponse(200, {}, 'User blocked successfully.');
   return res.status(200).json(response);
 });
@@ -611,7 +611,7 @@ export const unblockUser = asyncHandler(async (req: Request, res: Response) => {
       },
     },
   });
-  await redis.srem(`blocked:${userId}`, blockedUserId);
+  await redis.sRem(`blocked:${userId}`, blockedUserId);
   const response = new apiResponse(200, {}, 'User unblocked successfully.');
   return res.status(200).json(response);
 });
