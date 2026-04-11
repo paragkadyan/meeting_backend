@@ -9,6 +9,36 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
   socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, systemType = null, actorId = null, targetUserId = null }) => {
     try {
+      const normalizedContent = typeof content === 'string' ? content : '';
+      const normalizedAttachments = Array.isArray(attachments)
+        ? attachments
+            .map((attachment) => String(attachment ?? '').trim())
+            .filter((attachment) => attachment.length > 0)
+        : [];
+
+      if (!normalizedContent.trim() && normalizedAttachments.length === 0 && messageType !== 'system') {
+        socket.emit('error', { message: 'Message content or attachments are required' });
+        return;
+      }
+
+      const participants = await redis.sMembers(`convo:${convoId}:participants`);
+      if (participants.length === 2) {
+        const otherUserId = participants.find((id: string) => id !== userId);
+
+        if (otherUserId) {
+          const [iBlocked, theyBlocked] = await Promise.all([
+            redis.sIsMember(`blocked:${userId}`, otherUserId),
+            redis.sIsMember(`blocked:${otherUserId}`, userId),
+          ]);
+
+          if (iBlocked || theyBlocked) {
+            socket.emit("error", {
+              message: "Cannot send message. User is blocked."
+            });
+            return;
+          }
+        }
+      }
       const messageId = types.TimeUuid.now();
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
@@ -16,17 +46,21 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID, systemType, actorID, targetUserID
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [convoId, bucket, messageId, userId, content, messageType, attachments, replyToMessageID, systemType, actorId, targetUserId],
+        [convoId, bucket, messageId, userId, normalizedContent, messageType, normalizedAttachments, replyToMessageID, systemType, actorId, targetUserId],
         { prepare: true }
       );
 
+      const conversationPreview =
+        normalizedContent.trim() ||
+        (normalizedAttachments.length > 0 ? messageType : '');
 
       await prisma.conversationByUser.updateMany({
         where: { convoId },
         data: {
-          lastMessage: content,
+          lastMessage: conversationPreview,
           lastMessageSenderId: userId,
           lastMessageAt: new Date(),
+          lastMessageId: messageId.toString(),
         },
       });
 
@@ -41,10 +75,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         convoId,
         messageId,
         senderId: userId,
-        content,
+        content: normalizedContent,
         bucket,
         messageType,
-        attachments: [],
+        attachments: normalizedAttachments,
         replyToMessageID,
         systemType,
         actorId,
@@ -52,7 +86,6 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         createdAt: new Date().toISOString(),
       };
 
-      const participants = await redis.sMembers(`convo:${convoId}:participants`);
       if (!participants || !Array.isArray(participants)) {
         return;
       }
@@ -69,7 +102,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           metaKey,
           convoId,
           JSON.stringify({
-            lastMessage: content,
+            lastMessage: conversationPreview,
             lastMessageAt: Date.now(),
             lastMessageSender: userId,
           })
@@ -156,7 +189,9 @@ export const handleMessages = async (io: Server, socket: Socket) => {
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
       await redis.del(`unread:${userId}:${convoId}`);
-      await redis.set(`conv:${convoId}:user:${userId}:lastRead`,lastMessageId);
+      if (lastMessageId) {
+        await redis.set(`conv:${convoId}:user:${userId}:lastRead`, String(lastMessageId));
+      }
       await prisma.conversationByUser.update({ where: { userId_convoId: { userId, convoId } }, data: { unreadCount: 0, lastOpenedAt: new Date() }, });
       socket.to(`room:${convoId}`).emit('messagesRead', {
         userId,
@@ -171,7 +206,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
       await cassandra.execute(
         insertQuery,
-        [convoId, lastMessageId, userId,  new Date()],
+        [convoId, lastMessageId, userId, new Date()],
         { prepare: true }
       );
     } catch (error) {
@@ -207,11 +242,29 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         [newContent, convoId, bucket, messageId],
         { prepare: true }
       );
+
+      const isLast = await prisma.conversationByUser.count({
+        where: {
+          convoId,
+          lastMessageId: messageId
+        }
+      });
+
+      if (isLast > 0) {
+        await prisma.conversationByUser.updateMany({
+          where: { convoId },
+          data: {
+            lastMessage: newContent
+          }
+        });
+      }
+
       io.to(`room:${convoId}`).emit('messageEdited', {
         convoId,
         messageId,
         newContent,
       });
+
     } catch (error) {
       console.error('Edit message error:', error);
       socket.emit('error', { message: 'Failed to edit message' });
@@ -229,10 +282,48 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         [convoId, bucket, messageId],
         { prepare: true }
       );
+
+      const isLast = await prisma.conversationByUser.findFirst({
+        where: {
+          convoId,
+          lastMessageId: messageId
+        }
+      });
+
+      if (isLast) {
+        const result = await cassandra.execute(
+          `
+          SELECT messageID, content, senderID, isDeleted
+          FROM messages
+          WHERE convoID = ? AND bucket = ?
+          ORDER BY messageID DESC
+          LIMIT 20
+          `,
+          [convoId, bucket],
+          { prepare: true }
+        );
+
+        const prevMessage = result.rows.find(
+          (row) => row.messageid !== messageId && !row.isdeleted
+        );
+
+        await prisma.conversationByUser.updateMany({
+          where: { convoId },
+          data: {
+            lastMessage: prevMessage?.content || null,
+            lastMessageSenderId: prevMessage?.senderid || null,
+            lastMessageAt: prevMessage
+              ? new Date(prevMessage.messageid.getDate?.() || Date.now())
+              : null,
+            lastMessageId: prevMessage?.messageid || null
+          }
+        });
+      }
       io.to(`room:${convoId}`).emit('messageDeleted', {
         convoId,
         messageId,
       });
+
     } catch (error) {
       console.error('Delete message error:', error);
       socket.emit('error', { message: 'Failed to delete message' });

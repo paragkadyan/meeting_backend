@@ -21,6 +21,19 @@ export const createDirectChat = asyncHandler(async (req, res) => {
   const [u1, u2] = [...participants].sort();
   const pairKey = `${u1}_${u2}`;
 
+  const isBlocked = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: u1, blockedId: u2 },
+        { blockerId: u2, blockedId: u1 }
+      ]
+    }
+  });
+
+  if (isBlocked) {
+    throw new Error("Cannot send message. User is blocked.");
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.directChatLookup.findUnique({
       where: { pairKey }
@@ -91,9 +104,45 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   if (!groupName || !Array.isArray(participants)) {
     throw new apiError(400, "Invalid group chat data");
   }
+  const blockRelations = await prisma.userBlock.findMany({
+    where: {
+      OR: [
+        {
+          blockerId: req.user!.id,
+          blockedId: { in: participants }
+        },
+        {
+          blockerId: { in: participants },
+          blockedId: req.user!.id
+        }
+      ]
+    },
+    select: {
+      blockerId: true,
+      blockedId: true
+    }
+  });
+
+  const blockedSet = new Set<string>();
+
+  blockRelations.forEach((b) => {
+    if (b.blockerId === req.user!.id) {
+      blockedSet.add(b.blockedId); // you blocked them
+    } else {
+      blockedSet.add(b.blockerId); // they blocked you
+    }
+  });
+
+  const validParticipants = participants.filter(
+    (id) => !blockedSet.has(id)
+  );
+
+  if (validParticipants.length !== participants.length) {
+    throw new apiError(400, "Cannot add blocked users to group");
+  }
 
   const uniqueParticipants = Array.from(
-    new Set([...participants, creatorID])
+    new Set([...validParticipants, creatorID])
   );
 
   if (uniqueParticipants.length < 2) {
@@ -156,11 +205,42 @@ type ConversationDTO = {
   isPinned: boolean;
   isArchived: boolean;
   participants?: string[];
-
+  isActive: boolean;
+  leftAt: Date | null;
+  name: string | null;
+  avatarURL: string | null;
+  description: string | null;
+  creatorId: string | null;
+  adminIds: string[];
 };
 
 export const getConversations = asyncHandler(async (req, res) => {
   const userId = req.user!.id;
+
+  const blockedRelations = await prisma.userBlock.findMany({
+    where: {
+      OR: [
+        { blockerId: userId },
+        { blockedId: userId }
+      ]
+    },
+    select: {
+      blockerId: true,
+      blockedId: true
+    }
+  });
+
+  const blockedUserIds = new Set<string>();
+
+  blockedRelations.forEach((b: { blockerId: string; blockedId: string; }) => {
+    if (b.blockerId === userId) {
+      blockedUserIds.add(b.blockedId);
+    } else {
+      blockedUserIds.add(b.blockerId);
+    }
+  });
+
+
 
   const rows = await prisma.conversationByUser.findMany({
     where: { userId },
@@ -186,8 +266,10 @@ export const getConversations = asyncHandler(async (req, res) => {
       conversation: {
         select: {
           participants: {
-            where: { userId: { not: userId } },
-            select: { userId: true },
+            select: {
+              userId: true,
+              role: true,
+            },
           },
           name: true,
           avatarURL: true,
@@ -198,26 +280,42 @@ export const getConversations = asyncHandler(async (req, res) => {
     },
   });
 
-  const conversations: ConversationDTO[] = rows.map((r) => ({
-    convoId: r.convoId,
-    convoName: r.convoName,
-    convoType: r.convoType,
-    lastMessage: r.lastMessage,
-    lastMessageSenderId: r.lastMessageSenderId,
-    lastMessageAt: r.lastMessageAt,
-    unreadCount: r.unreadCount,
-    lastOpenedAt: r.lastOpenedAt,
-    isPinned: r.isPinned,
-    isArchived: r.isArchived,
-    participants: r.conversation?.participants?.map((p) => p.userId) ?? [],
-    isActive: r.isActive,
-    leftAt: r.leftAt,
-    name: r.conversation?.name ?? null,
-    avatarURL: r.conversation?.avatarURL ?? null,
-    description: r.conversation?.description ?? null,
-    creatorId: r.conversation?.creatorId ?? null,
-  }));
+  const conversations: ConversationDTO[] = rows.map((r) => {
+    const allParticipants = r.conversation?.participants ?? [];
+    const participants = allParticipants
+      .map((p) => p.userId)
+      .filter((participantId) => participantId !== userId);
+    const adminIds = allParticipants
+      .filter((p) => p.role === "admin")
+      .map((p) => p.userId);
 
+    const isBlocked =
+      r.convoType === "direct" &&
+      participants.some((p) => blockedUserIds.has(p));
+
+    return {
+      convoId: r.convoId,
+      convoName: isBlocked ? "Blocked User" : r.convoName,
+      convoType: r.convoType,
+      lastMessage: r.lastMessage,
+      lastMessageSenderId: r.lastMessageSenderId,
+      lastMessageAt: r.lastMessageAt,
+      unreadCount: r.unreadCount,
+      lastOpenedAt: r.lastOpenedAt,
+      isPinned: r.isPinned,
+      isArchived: r.isArchived,
+      participants,
+
+      isActive: r.isActive,
+      leftAt: r.leftAt,
+
+      name: isBlocked ? "Blocked User" : r.conversation?.name ?? null,
+      avatarURL: isBlocked ? null : r.conversation?.avatarURL ?? null,
+      description: isBlocked ? null : r.conversation?.description ?? null,
+      creatorId: isBlocked ? null : r.conversation?.creatorId ?? null,
+      adminIds: isBlocked ? [] : adminIds,
+    };
+  });
   return res
     .status(200)
     .json(new apiResponse(200, conversations, "Conversations fetched"));
@@ -566,15 +664,14 @@ export const groupUpdate = asyncHandler(async (req, res) => {
   }
   const userId = req.user!.id;
 
-  const user = await prisma.user.findFirst({
-    where: { id: userId },
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: { convoId, userId },
+    },
   });
-  if (!user) {
-    throw new apiError(403, "Not a participant of the group");
+  if (!participant) {
+    throw new apiError(403, "Only group members can update the group");
   }
-  // if (convo.creatorId !== userId) {
-  //   throw new apiError(403, "Only group admin can update the group");
-  // }
 
   const updateData: any = {};
   if (groupName !== undefined) updateData.name = groupName;
@@ -616,6 +713,10 @@ export const groupLeaveByUser = asyncHandler(async (req, res) => {
       convoId_userId: { convoId, userId }
     }
   });
+
+  if(participant?.role === "admin") {
+    throw new apiError(403, "Group admins cannot leave the group. Please assign another admin before leaving.");
+  }
 
   if (!participant) {
     return res.status(400).json({ message: "Not a group member" });
@@ -660,6 +761,43 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   if (!convo || convo.type !== "group") {
     throw new apiError(404, "Group conversation not found");
   }
+  const blockRelations = await prisma.userBlock.findMany({
+    where: {
+      OR: [
+        {
+          blockerId: req.user!.id,
+          blockedId: { in: newUserIds }
+        },
+        {
+          blockerId: { in: newUserIds },
+          blockedId: req.user!.id
+        }
+      ]
+    },
+    select: {
+      blockerId: true,
+      blockedId: true
+    }
+  });
+
+  const blockedSet = new Set<string>();
+
+  blockRelations.forEach((b) => {
+    if (b.blockerId === req.user!.id) {
+      blockedSet.add(b.blockedId); 
+    } else {
+      blockedSet.add(b.blockerId); 
+    }
+  });
+
+  const validParticipants = newUserIds.filter(
+    (id) => !blockedSet.has(id)
+  );
+
+  if (validParticipants.length !== newUserIds.length) {
+    throw new apiError(400, "Cannot add blocked users to group");
+  }
+
   const participant = await prisma.conversationParticipant.findUnique({
     where: {
       convoId_userId: {
@@ -669,9 +807,9 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     },
   });
 
-  // if (!participant || participant.role !== "admin") {
-  //   throw new apiError(403, "Only group admins can add new users");
-  // }
+  if (!participant ) {
+    throw new apiError(403, "Only group members can add new users");
+  }
 
   const convoUsers = await prisma.conversationByUser.findMany({
     where: { convoId },
@@ -694,7 +832,7 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   const usersToCreate: string[] = [];
   const usersToReactivate: string[] = [];
 
-  for (const id of newUserIds) {
+  for (const id of validParticipants) {
     if (activeParticipantIds.has(id)) continue;
 
     const convoUser = convoUserMap.get(id);
@@ -786,9 +924,9 @@ export const kickUserFromGroup = asyncHandler(async (req, res) => {
       },
     },
   });
-  // if (!participant || participant.role !== "admin") {
-  //   throw new apiError(403, "Only group admins can kick users");
-  // }
+  if (!participant || participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can remove members");
+  }
   const userToKick = await prisma.conversationParticipant.findUnique({
     where: {
       convoId_userId: {
@@ -869,5 +1007,209 @@ export const lastReadMessageByUser = asyncHandler(async (req, res) => {
   }));
   return res.status(200).json(
     new apiResponse(200, lastReadMap, "Last read messages fetched")
+  );
+});
+
+export const assignAdminRole = asyncHandler(async (req, res) => {
+  const { convoId, userIdToPromote } = req.body;
+  const userId = req.user!.id;
+  if (!convoId || !userIdToPromote) {
+    throw new apiError(400, "Invalid request data");
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+  });
+  if (!convo || convo.type !== "group") {
+    throw new apiError(404, "Group conversation not found");
+  }
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId,
+      },
+    },
+  });
+  if (!participant || participant.role !== "admin") {  
+    throw new apiError(403, "Only group admins can assign admin role");
+  }
+  const userToPromote = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId: userIdToPromote,
+      },
+    },
+  });
+  if (!userToPromote) {
+    throw new apiError(404, "User to promote not found in group");
+  }
+  if (userToPromote.role === "admin") {
+    throw new apiError(400, "User is already an admin");
+  }
+  await prisma.conversationParticipant.update({
+    where: {
+      convoId_userId: { convoId, userId: userIdToPromote }
+    },
+    data: {
+      role: "admin"
+    }
+  });
+  return res.status(200).json(
+    new apiResponse(200, { userIdPromoted: userIdToPromote }, "User promoted to admin")
+  );
+});
+
+export const removeAdminRole = asyncHandler(async (req, res) => {
+  const { convoId, userIdToDemote, userIdToPromote } = req.body;
+  const userId = req.user!.id;
+
+  if (!convoId || !userIdToDemote || !userIdToPromote) {
+    throw new apiError(400, "convoId, userIdToDemote, and userIdToPromote are required");
+  }
+
+  if (userIdToDemote === userIdToPromote) {
+    throw new apiError(400, "Replacement admin must be a different user");
+  }
+
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+  });
+  if (!convo || convo.type !== "group") {
+    throw new apiError(404, "Group conversation not found");
+  }
+
+  const actingParticipant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId,
+      },
+    },
+  });
+  if (!actingParticipant || actingParticipant.role !== "admin") {
+    throw new apiError(403, "Only group admins can remove admin role");
+  }
+
+  const [userToDemoteParticipant, userToPromoteParticipant] = await Promise.all([
+    prisma.conversationParticipant.findUnique({
+      where: {
+        convoId_userId: {
+          convoId,
+          userId: userIdToDemote,
+        },
+      },
+    }),
+    prisma.conversationParticipant.findUnique({
+      where: {
+        convoId_userId: {
+          convoId,
+          userId: userIdToPromote,
+        },
+      },
+    }),
+  ]);
+
+  if (!userToDemoteParticipant) {
+    throw new apiError(404, "Admin to demote not found in group");
+  }
+  if (userToDemoteParticipant.role !== "admin") {
+    throw new apiError(400, "Selected user is not an admin");
+  }
+  if (!userToPromoteParticipant) {
+    throw new apiError(404, "Replacement user not found in group");
+  }
+  if (userToPromoteParticipant.role === "admin") {
+    throw new apiError(400, "Replacement user is already an admin");
+  }
+
+  await prisma.$transaction([
+    prisma.conversationParticipant.update({
+      where: {
+        convoId_userId: { convoId, userId: userIdToDemote },
+      },
+      data: {
+        role: "member",
+      },
+    }),
+    prisma.conversationParticipant.update({
+      where: {
+        convoId_userId: { convoId, userId: userIdToPromote },
+      },
+      data: {
+        role: "admin",
+      },
+    }),
+  ]);
+
+  return res.status(200).json(
+    new apiResponse(
+      200,
+      { userIdDemoted: userIdToDemote, userIdPromoted: userIdToPromote },
+      "Admin role transferred successfully"
+    )
+  );
+});
+
+export const groupLeaveByAdmin = asyncHandler(async (req, res) => {
+  const { convoId } = req.body;
+  const userId = req.user!.id;
+  if (!convoId) {
+    throw new apiError(400, "convoId is required");
+  }
+  const convo = await prisma.conversation.findUnique({
+    where: { id: convoId },
+    select: { type: true }
+  });
+  if (!convo) {
+    throw new apiError(404, "Conversation not found");
+  }
+  if (convo.type !== "group") {
+    throw new apiError(400, "Cannot leave direct chat");
+  }
+  const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId
+      }
+    }
+  });
+  if (!participant) {
+    throw new apiError(404, "Participant not found");
+  }
+    if (participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can leave the group. Please assign another admin before leaving.");
+  }
+  const otherParticipants = await prisma.conversationParticipant.findMany({
+    where: {
+      convoId,
+      userId: { not: userId }
+    }
+  });
+  if (otherParticipants.length === 0) {
+    await prisma.conversation.update({
+      where: { id: convoId },
+      data: { isActive: true }
+    });
+  }
+  await prisma.$transaction([
+    prisma.conversationParticipant.delete({
+      where: {
+          convoId_userId: { convoId, userId }
+      }    }),
+    prisma.conversationByUser.update({
+      where: {
+        userId_convoId: { userId, convoId }
+      },
+      data: {
+        isActive: false,
+        leftAt: new Date()
+      }
+    })
+  ]);
+  await redis.sRem(`convo:${convoId}:participants`, userId);
+  return res.status(200).json(
+    new apiResponse(200, { convoId }, "Left group successfully")
   );
 });

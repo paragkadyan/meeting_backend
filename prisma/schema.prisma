@@ -45,6 +45,8 @@ model User {
   createdConversations Conversation[] @relation("Creator")
   conversations        ConversationParticipant[]
   convoStates          ConversationByUser[]
+  blockedUsers   UserBlock[] @relation("Blocker")
+  blockedByUsers UserBlock[] @relation("Blocked")
 
   @@index([email])
   @@index([mobileNumber])
@@ -116,6 +118,7 @@ model ConversationByUser {
   lastMessage           String?
   lastMessageSenderId   String?
   lastMessageAt         DateTime?
+  lastMessageId         String?
 
   unreadCount  Int      @default(0)
   lastOpenedAt DateTime?
@@ -154,4 +157,23 @@ model MediaFile {
   @@index([chatId], map: "idx_media_files_chat_id")
   @@index([fileName], map: "idx_media_files_file_name")
   @@map("media_files")
+}
+
+model Admin {
+  id       String   @id @default(uuid())
+  email    String   @unique
+  password String
+  name     String?
+}
+
+model UserBlock {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
 }

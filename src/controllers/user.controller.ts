@@ -13,6 +13,7 @@ import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
 import { apiResponse } from '../utils/apiResponse';
 import { apiError } from '../utils/apiError';
 import { verifyGoogleToken } from '../utils/googleAuth';
+import { redis } from '../db/redis';
 
 
 export const signup = asyncHandler(async (req: Request, res: Response) => {
@@ -502,12 +503,36 @@ export const searchUser = asyncHandler(async (req: Request, res: Response) => {
     throw new apiError(404, 'User not found');
   }
 
+  const isblocked = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: users?.id,
+      blockedId: req.user?.id
+    }
+  });
+
+  if (isblocked) {
+    throw new apiError(403, 'You have been blocked by this user.');
+  }
+
+  const blockedUser = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: req.user?.id,
+      blockedId: users?.id
+    }
+  });
+
+  let isBlocked = false;
+  if (blockedUser) {
+    isBlocked = true;
+  }
+
   const response = new apiResponse(200, {
     id: users.id,
     name: users.name,
     lname: users.lname,
     email: users.email,
-    profileURL: users.profileURL
+    profileURL: users.profileURL,
+    isBlocked
   }, 'Users fetched successfully.');
   return res.status(200).json(response);
 });
@@ -530,3 +555,89 @@ export const feedback = asyncHandler(async (req: Request, res: Response) => {
   const response = new apiResponse(200, {}, 'Feedback submitted successfully.');
   return res.status(200).json(response);
 });
+
+export const blockUser = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  const { blockedUserId } = req.body;
+  if (!blockedUserId) {
+    throw new apiError(400, 'Blocked user ID is required.');
+  }
+  if (userId === blockedUserId) {
+    throw new apiError(400, 'You cannot block yourself.');
+  }
+  const existingBlock = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: userId,
+      blockedId: blockedUserId,
+    },
+  });
+  if (existingBlock) {
+    throw new apiError(400, 'User is already blocked.');
+  }
+  await prisma.userBlock.create({
+    data: {
+      blockerId: userId!,
+      blockedId: blockedUserId,
+    },
+  });
+  await redis.sAdd(`blocked:${userId}`, blockedUserId);
+  const response = new apiResponse(200, {}, 'User blocked successfully.');
+  return res.status(200).json(response);
+});
+
+export const unblockUser = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  const { blockedUserId } = req.body;
+  if (!userId) {
+    throw new apiError(401, 'Unauthorized');
+  }
+  if (!blockedUserId) {
+    throw new apiError(400, 'Blocked user ID is required.');
+  }
+  const existingBlock = await prisma.userBlock.findFirst({
+    where: {
+      blockerId: userId,
+      blockedId: blockedUserId,
+    },
+  });
+  if (!existingBlock) {
+    throw new apiError(400, 'User is not blocked.');
+  }
+  await prisma.userBlock.delete({
+    where: {
+      blockerId_blockedId: {
+        blockerId: userId,
+        blockedId: blockedUserId,
+      },
+    },
+  });
+  await redis.sRem(`blocked:${userId}`, blockedUserId);
+  const response = new apiResponse(200, {}, 'User unblocked successfully.');
+  return res.status(200).json(response);
+});
+
+export const getBlockedUsers = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    throw new apiError(401, 'Unauthorized');
+  }
+  const blockedUsers = await prisma.userBlock.findMany({
+    where: {
+      blockerId: req.user!.id
+    },
+    include: {
+      blocked: {
+        select: {
+          id: true,
+          name: true,
+          lname: true,
+          email: true,
+          profileURL: true
+        }
+      }
+    }
+  });
+  const response = new apiResponse(200, blockedUsers, 'Blocked users fetched successfully.');
+  return res.status(200).json(response);
+});
+
