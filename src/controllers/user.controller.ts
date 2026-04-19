@@ -474,6 +474,11 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
 
 export const inviteUser = asyncHandler(async (req: Request, res: Response) => {
   const { guestEmail } = req.body;
+  const userId = req.user?.id;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw new apiError(404, 'User not found');
+  }
   if (!guestEmail) throw new apiError(400, 'Email is required to send an invite.');
   await sendTemplatedEmail({
     to: guestEmail,
@@ -482,6 +487,8 @@ export const inviteUser = asyncHandler(async (req: Request, res: Response) => {
     variables: {
       appName: "Heyllow",
       signupUrl: FRONTEND_ORIGIN as string,
+      firstName: user?.name as string,
+      lastName: user?.lname as string,
     },
   });
   const response = new apiResponse(200, {}, 'Invitation sent successfully.');
