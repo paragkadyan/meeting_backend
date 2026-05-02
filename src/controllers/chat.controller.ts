@@ -1179,18 +1179,25 @@ export const groupLeaveByAdmin = asyncHandler(async (req, res) => {
     throw new apiError(404, "Participant not found");
   }
     if (participant.role !== "admin") {
-    throw new apiError(403, "Only group admins can leave the group. Please assign another admin before leaving.");
+    throw new apiError(403, "You are not group admin");
   }
   const otherParticipants = await prisma.conversationParticipant.findMany({
     where: {
       convoId,
       userId: { not: userId }
-    }
+    },
+    select: { userId: true, role: true }
   });
-  if (otherParticipants.length === 0) {
+  const hasOtherUsers = otherParticipants.length > 0;
+  const hasOtherAdmin = otherParticipants.some(p => p.role === "admin");
+
+  if (hasOtherUsers && !hasOtherAdmin) {
+    throw new apiError(400, "Assign another admin before leaving");
+  }
+  if (!hasOtherUsers) {
     await prisma.conversation.update({
       where: { id: convoId },
-      data: { isActive: true }
+      data: { isActive: false }
     });
   }
   await prisma.$transaction([
