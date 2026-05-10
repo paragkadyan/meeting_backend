@@ -161,31 +161,4 @@ export const changeAdminPassword = asyncHandler(async (req, res) => {
     return res.status(200).json(new apiResponse(200, {}, "Password changed successfully"));
 });
 
-export const createAdmin = asyncHandler(async (req, res) => {
-    const { name, email, password } = req.body;
-    if (!email || !password) {
-        return res.status(400).json(new apiError(400, "Email and password are required"));
-    }
-    const existingAdmin = await prisma.admin.findUnique({
-        where: { email },
-    });
-    if (existingAdmin) {
-        return res.status(400).json(new apiError(400, "Admin with this email already exists"));
-    }
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newAdmin = await prisma.admin.create({
-        data: {
-            name,
-            email,
-            password: hashedPassword,
-        },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-        },
-    });
-    return res.status(201).json(new apiResponse(201, newAdmin, "Admin created successfully"));
-});
-
 
