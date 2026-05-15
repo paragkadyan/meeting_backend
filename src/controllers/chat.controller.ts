@@ -204,7 +204,8 @@ type ConversationDTO = {
   lastOpenedAt: Date | null;
   isPinned: boolean;
   isArchived: boolean;
-  participants?: string[];
+  participants?: { userId: string; isBlocked: boolean }[];
+  isBlocked: boolean;
   isActive: boolean;
   leftAt: Date | null;
   name: string | null;
@@ -283,19 +284,22 @@ export const getConversations = asyncHandler(async (req, res) => {
   const conversations: ConversationDTO[] = rows.map((r) => {
     const allParticipants = r.conversation?.participants ?? [];
     const participants = allParticipants
-      .map((p) => p.userId)
-      .filter((participantId) => participantId !== userId);
+      .filter((p) => p.userId !== userId)
+      .map((p) => ({
+        userId: p.userId,
+        isBlocked: blockedUserIds.has(p.userId),
+      }));
     const adminIds = allParticipants
       .filter((p) => p.role === "admin")
       .map((p) => p.userId);
 
-    const isBlocked =
+    const convoIsBlocked =
       r.convoType === "direct" &&
-      participants.some((p) => blockedUserIds.has(p));
+      participants.some((p) => p.isBlocked);
 
     return {
       convoId: r.convoId,
-      convoName: isBlocked ? "Blocked User" : r.convoName,
+      convoName: convoIsBlocked ? "Blocked User" : r.convoName,
       convoType: r.convoType,
       lastMessage: r.lastMessage,
       lastMessageSenderId: r.lastMessageSenderId,
@@ -305,15 +309,16 @@ export const getConversations = asyncHandler(async (req, res) => {
       isPinned: r.isPinned,
       isArchived: r.isArchived,
       participants,
+      isBlocked: convoIsBlocked,
 
       isActive: r.isActive,
       leftAt: r.leftAt,
 
-      name: isBlocked ? "Blocked User" : r.conversation?.name ?? null,
-      avatarURL: isBlocked ? null : r.conversation?.avatarURL ?? null,
-      description: isBlocked ? null : r.conversation?.description ?? null,
-      creatorId: isBlocked ? null : r.conversation?.creatorId ?? null,
-      adminIds: isBlocked ? [] : adminIds,
+      name: convoIsBlocked ? "Blocked User" : r.conversation?.name ?? null,
+      avatarURL: convoIsBlocked ? null : r.conversation?.avatarURL ?? null,
+      description: convoIsBlocked ? null : r.conversation?.description ?? null,
+      creatorId: convoIsBlocked ? null : r.conversation?.creatorId ?? null,
+      adminIds: convoIsBlocked ? [] : adminIds,
     };
   });
   return res
