@@ -31,7 +31,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           });
           const dbIds = dbParts.map((p) => p.userId);
           if (dbIds.length > 0) {
-            await redis.sAdd(`convo:${convoId}:participants`, ...dbIds);
+            await redis.sAdd(`convo:${convoId}:participants`, dbIds);
             participants = dbIds;
           }
         } catch (err) {

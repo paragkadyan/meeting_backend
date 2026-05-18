@@ -215,6 +215,33 @@ type ConversationDTO = {
   adminIds: string[];
 };
 
+const normalizeUserIds = (input: unknown): string[] => {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new apiError(400, "No user IDs provided");
+  }
+
+  const userIds = input
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return entry.trim();
+      }
+
+      if (entry && typeof entry === "object" && "userId" in entry) {
+        const { userId } = entry as { userId?: unknown };
+        return typeof userId === "string" ? userId.trim() : "";
+      }
+
+      return "";
+    })
+    .filter((id): id is string => id.length > 0);
+
+  if (userIds.length === 0) {
+    throw new apiError(400, "No valid user IDs provided");
+  }
+
+  return [...new Set(userIds)];
+};
+
 export const getConversations = asyncHandler(async (req, res) => {
   const userId = req.user!.id;
 
@@ -467,10 +494,7 @@ export const getMessages = asyncHandler(async (req, res) => {
 
 
 export const getUsersBatch = asyncHandler(async (req, res) => {
-  const { userIds } = req.body;
-  if (!Array.isArray(userIds) || userIds.length === 0) {
-    throw new apiError(400, "No user IDs provided");
-  }
+  const userIds = normalizeUserIds(req.body?.userIds);
 
   const result = await prisma.user.findMany({
     where: {
@@ -497,11 +521,7 @@ export const getUsersBatch = asyncHandler(async (req, res) => {
 
 
 export const userLastSeen = asyncHandler(async (req, res) => {
-  const { userIds } = req.body;
-
-  if (!Array.isArray(userIds) || userIds.length === 0) {
-    throw new apiError(400, "userIds is required");
-  }
+  const userIds = normalizeUserIds(req.body?.userIds);
 
   const keys = userIds.map((id: string) => `user:lastSeen:${id}`);
   const values = await redis.mGet(keys);
@@ -690,6 +710,65 @@ export const groupUpdate = asyncHandler(async (req, res) => {
 
   return res.status(200).json(
     new apiResponse(200, { convoId }, "Group updated successfully")
+  );
+});
+
+export const updateConversationPreferences = asyncHandler(async (req, res) => {
+  const { convoId, isArchived, isPinned } = req.body;
+  const userId = req.user!.id;
+
+  if (!convoId) {
+    throw new apiError(400, "convoId is required");
+  }
+
+  if (isArchived === undefined && isPinned === undefined) {
+    throw new apiError(400, "At least one of isArchived or isPinned is required");
+  }
+
+  const updateData: { isArchived?: boolean; isPinned?: boolean } = {};
+
+  if (isArchived !== undefined) {
+    if (typeof isArchived !== "boolean") {
+      throw new apiError(400, "isArchived must be a boolean");
+    }
+    updateData.isArchived = isArchived;
+  }
+
+  if (isPinned !== undefined) {
+    if (typeof isPinned !== "boolean") {
+      throw new apiError(400, "isPinned must be a boolean");
+    }
+    updateData.isPinned = isPinned;
+  }
+
+  const conversationByUser = await prisma.conversationByUser.findUnique({
+    where: {
+      userId_convoId: { userId, convoId }
+    },
+    select: {
+      userId: true,
+      convoId: true
+    }
+  });
+
+  if (!conversationByUser) {
+    throw new apiError(404, "Conversation not found for this user");
+  }
+
+  const updatedConversation = await prisma.conversationByUser.update({
+    where: {
+      userId_convoId: { userId, convoId }
+    },
+    data: updateData,
+    select: {
+      convoId: true,
+      isArchived: true,
+      isPinned: true
+    }
+  });
+
+  return res.status(200).json(
+    new apiResponse(200, updatedConversation, "Conversation preferences updated successfully")
   );
 });
 
