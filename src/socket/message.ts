@@ -21,7 +21,24 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         return;
       }
 
-      const participants = await redis.sMembers(`convo:${convoId}:participants`);
+      let participants = await redis.sMembers(`convo:${convoId}:participants`);
+
+      if (!participants || participants.length === 0) {
+        try {
+          const dbParts = await prisma.conversationParticipant.findMany({
+            where: { convoId },
+            select: { userId: true },
+          });
+          const dbIds = dbParts.map((p) => p.userId);
+          if (dbIds.length > 0) {
+            await redis.sAdd(`convo:${convoId}:participants`, dbIds);
+            participants = dbIds;
+          }
+        } catch (err) {
+          console.error('Failed to load convo participants from DB:', err);
+        }
+      }
+
       if (participants.length === 2) {
         const otherUserId = participants.find((id: string) => id !== userId);
 
