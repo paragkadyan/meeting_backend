@@ -49,6 +49,7 @@ model User {
   convoStates          ConversationByUser[]
   blockedUsers   UserBlock[] @relation("Blocker")
   blockedByUsers UserBlock[] @relation("Blocked")
+  mediaFiles     MediaFile[]
 
   @@index([email])
   @@index([mobileNumber])
