@@ -37,6 +37,8 @@ model User {
   authProvider AuthProvider @default(LOCAL)
   userType     UserType    @default(REGULAR)
   timestamp    DateTime    @default(now())
+  storageUsed  BigInt @default(0)
+  storageLimit BigInt @default(10737418240)
 
   feedbacks      Feedback[]
   payment        Payment[]        
@@ -47,6 +49,7 @@ model User {
   convoStates          ConversationByUser[]
   blockedUsers   UserBlock[] @relation("Blocker")
   blockedByUsers UserBlock[] @relation("Blocked")
+  mediaFiles     MediaFile[]
 
   @@index([email])
   @@index([mobileNumber])
@@ -157,6 +160,8 @@ model MediaFile {
   @@index([chatId], map: "idx_media_files_chat_id")
   @@index([fileName], map: "idx_media_files_file_name")
   @@map("media_files")
+
+  sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
 }
 
 model Admin {
