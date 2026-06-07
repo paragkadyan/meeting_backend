@@ -13,19 +13,28 @@ export interface MediaRecord {
 }
 
 export async function createMediaRecord(record: MediaRecord): Promise<void> {
-  await prisma.mediaFile.create({
-    data: {
-      id: record.id,
-      fileName: record.fileName,
-      objectKey: record.objectKey,
-      fileType: record.fileType,
-      mimeType: record.mimeType,
-      size: BigInt(record.size),
-      chatId: record.chatId,
-      senderId: record.senderId,
-      createdAt: record.createdAt,
-    },
-  });
+  const size = BigInt(record.size);
+
+  await prisma.$transaction([
+    prisma.mediaFile.create({
+      data: {
+        id: record.id,
+        fileName: record.fileName,
+        objectKey: record.objectKey,
+        fileType: record.fileType,
+        mimeType: record.mimeType,
+        size,
+        chatId: record.chatId,
+        senderId: record.senderId,
+        createdAt: record.createdAt,
+      },
+    }),
+    prisma.$executeRaw`
+      UPDATE "User"
+      SET "storageUsed" = "storageUsed" + ${size}
+      WHERE "id" = ${record.senderId}
+    `,
+  ]);
 }
 
 export async function getMediaById(id: string): Promise<MediaRecord | null> {
@@ -68,7 +77,23 @@ export async function getMediaByIds(ids: string[]): Promise<MediaRecord[]> {
 }
 
 export async function deleteMediaById(id: string): Promise<void> {
-  await prisma.mediaFile.delete({
+  const media = await prisma.mediaFile.findUnique({
     where: { id },
+    select: { senderId: true, size: true },
   });
+
+  if (!media) {
+    return;
+  }
+
+  await prisma.$transaction([
+    prisma.mediaFile.delete({
+      where: { id },
+    }),
+    prisma.$executeRaw`
+      UPDATE "User"
+      SET "storageUsed" = GREATEST("storageUsed" - ${media.size}, 0)
+      WHERE "id" = ${media.senderId}
+    `,
+  ]);
 }
