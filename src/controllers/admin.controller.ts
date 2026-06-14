@@ -19,6 +19,7 @@ export const getAllUsers = asyncHandler(async (req, res) => {
             email: true,
             lname: true,
             mobileNumber: true,
+            storageUsed: true,
         },
     });
     return res.status(200).json(new apiResponse(200, users, "Users fetched successfully"));
@@ -134,7 +135,13 @@ export const adminLogin = asyncHandler(async (req, res) => {
 });
 
 export const adminDashboard = asyncHandler(async (req, res) => {
-    return res.status(200).json(new apiResponse(200, { message: 'Admin dashboard' }, 'Admin dashboard fetched successfully'));
+    const totalUsers = await prisma.user.count();
+    const totalFeedbacks = await prisma.feedback.count();
+    const totalGroups = await prisma.conversation.count({
+        where: { type: 'group' }
+    });
+
+    return res.status(200).json(new apiResponse(200, { totalUsers, totalFeedbacks, totalGroups }, 'Admin dashboard fetched successfully'));
 });
 
 export const changeAdminPassword = asyncHandler(async (req, res) => {
@@ -160,5 +167,3 @@ export const changeAdminPassword = asyncHandler(async (req, res) => {
     });
     return res.status(200).json(new apiResponse(200, {}, "Password changed successfully"));
 });
-
-
