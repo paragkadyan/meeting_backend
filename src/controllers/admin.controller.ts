@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { sendTemplatedEmail } from "../services/email.service";
 
 export const getAllUsers = asyncHandler(async (req, res) => {
-    const users = await prisma.user.findMany({
+    const usersdetail = await prisma.user.findMany({
         select: {
             id: true,
             name: true,
@@ -22,6 +22,10 @@ export const getAllUsers = asyncHandler(async (req, res) => {
             storageUsed: true,
         },
     });
+    const users = usersdetail.map(user => ({
+        ...user,
+        storageUsed: String(user.storageUsed),
+    }));
     return res.status(200).json(new apiResponse(200, users, "Users fetched successfully"));
 });
 
