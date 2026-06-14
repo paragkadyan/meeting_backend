@@ -19,8 +19,8 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
       const payload = verifyAccessToken(access);
       req.user = { id: payload.userId };
       return next();
-    } catch {
-
+    } catch (error) {
+      throw new apiError(401, 'Access token expired');
     }
   }
 
@@ -72,7 +72,7 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
 
     req.user = { id: payload.userId };
     return next();
-  } catch {
+  } catch (error) {
     throw new apiError(401, "Invalid or expired refresh token");
   }
 });

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
-import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise } from '../services/token.service';
+import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise, isRefreshTokenActive } from '../services/token.service';
 import { COOKIE_DOMAIN, COOKIE_SECURE, FRONTEND_ORIGIN } from '../config/env';
 import { prisma } from '../db/post';
 import { asyncHandler } from "../utils/asyncHandler";
@@ -660,82 +660,48 @@ export const refreshAccessToken = asyncHandler(
       const payload = verifyRefreshToken(oldRefreshToken);
 
       if (!payload?.userId || !payload?.jti) {
-        throw new apiError(401, 'Invalid refresh token');
+        throw new apiError(401, 'Invalid refresh token payload');
       }
 
-      // Rotate refresh token
-      await revokeRefreshToken(
-        payload.userId,
-        payload.jti
-      );
+      // 1. CRITICAL FIX: Validate that this specific refresh token is still active
+      const active = await isRefreshTokenActive(payload.userId, payload.jti);
+
+      if (!active) {
+        // Token has been used already or revoked. Clear cookies and throw.
+        res.clearCookie('accessToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
+        res.clearCookie('refreshToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
+        throw new apiError(401, 'Session compromised or expired');
+      }
+
+      // 2. Safe to rotate now
+      await revokeRefreshToken(payload.userId, payload.jti);
 
       const newJti = uuidv4();
+      const newAccessToken = signAccessToken({ userId: payload.userId });
+      const newRefreshToken = signRefreshToken({ userId: payload.userId, jti: newJti });
 
-      const newAccessToken = signAccessToken({
-        userId: payload.userId,
-      });
+      await registerRefreshToken(payload.userId, newJti);
 
-      const newRefreshToken = signRefreshToken({
-        userId: payload.userId,
-        jti: newJti,
-      });
+      // 3. Set cookies with structured configurations
+      const cookieOptions = {
+        httpOnly: true,
+        secure: COOKIE_SECURE,
+        sameSite: 'none' as const,
+        path: '/',
+      };
 
-      await registerRefreshToken(
-        payload.userId,
-        newJti
-      );
-
-      // Set cookies
-      res.cookie(
-        'accessToken',
-        newAccessToken,
-        {
-          httpOnly: true,
-          secure: COOKIE_SECURE,
-          sameSite: 'none',
-          maxAge: 15 * 60 * 1000,
-          path: '/',
-        }
-      );
-
-      res.cookie(
-        'refreshToken',
-        newRefreshToken,
-        {
-          httpOnly: true,
-          secure: COOKIE_SECURE,
-          sameSite: 'none',
-          maxAge: 7 * 24 * 60 * 60 * 1000,
-          path: '/',
-        }
-      );
+      res.cookie('accessToken', newAccessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+      res.cookie('refreshToken', newRefreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
 
       return res.status(200).json(
-        new apiResponse(
-          200,
-          {
-            accessToken: newAccessToken,
-          },
-          'Token refreshed'
-        )
+        new apiResponse(200, { accessToken: newAccessToken }, 'Token refreshed successfully')
       );
-    } catch {
-      res.clearCookie('accessToken', {
-        path: '/',
-        sameSite: 'none',
-        secure: COOKIE_SECURE,
-      });
+    } catch (error) {
+      // 4. CRITICAL FIX: Ensure clearCookie flags exactly match your setting flags
+      res.clearCookie('accessToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
+      res.clearCookie('refreshToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
 
-      res.clearCookie('refreshToken', {
-        path: '/',
-        sameSite: 'none',
-        secure: COOKIE_SECURE,
-      });
-
-      throw new apiError(
-        401,
-        'Refresh token expired'
-      );
+      throw new apiError(401, 'Refresh token expired or invalid');
     }
   }
 );
