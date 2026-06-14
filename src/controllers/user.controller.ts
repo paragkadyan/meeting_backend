@@ -648,3 +648,94 @@ export const getBlockedUsers = asyncHandler(async (req: Request, res: Response) 
   return res.status(200).json(response);
 });
 
+export const refreshAccessToken = asyncHandler(
+  async (req: Request, res: Response) => {
+    const oldRefreshToken = req.cookies?.refreshToken;
+
+    if (!oldRefreshToken) {
+      throw new apiError(401, 'Refresh token missing');
+    }
+
+    try {
+      const payload = verifyRefreshToken(oldRefreshToken);
+
+      if (!payload?.userId || !payload?.jti) {
+        throw new apiError(401, 'Invalid refresh token');
+      }
+
+      // Rotate refresh token
+      await revokeRefreshToken(
+        payload.userId,
+        payload.jti
+      );
+
+      const newJti = uuidv4();
+
+      const newAccessToken = signAccessToken({
+        userId: payload.userId,
+      });
+
+      const newRefreshToken = signRefreshToken({
+        userId: payload.userId,
+        jti: newJti,
+      });
+
+      await registerRefreshToken(
+        payload.userId,
+        newJti
+      );
+
+      // Set cookies
+      res.cookie(
+        'accessToken',
+        newAccessToken,
+        {
+          httpOnly: true,
+          secure: COOKIE_SECURE,
+          sameSite: 'none',
+          maxAge: 15 * 60 * 1000,
+          path: '/',
+        }
+      );
+
+      res.cookie(
+        'refreshToken',
+        newRefreshToken,
+        {
+          httpOnly: true,
+          secure: COOKIE_SECURE,
+          sameSite: 'none',
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: '/',
+        }
+      );
+
+      return res.status(200).json(
+        new apiResponse(
+          200,
+          {
+            accessToken: newAccessToken,
+          },
+          'Token refreshed'
+        )
+      );
+    } catch {
+      res.clearCookie('accessToken', {
+        path: '/',
+        sameSite: 'none',
+        secure: COOKIE_SECURE,
+      });
+
+      res.clearCookie('refreshToken', {
+        path: '/',
+        sameSite: 'none',
+        secure: COOKIE_SECURE,
+      });
+
+      throw new apiError(
+        401,
+        'Refresh token expired'
+      );
+    }
+  }
+);
