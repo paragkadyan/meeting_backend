@@ -141,7 +141,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     path: '/',
   });
 
-  const response = new apiResponse(201, { user: { id: newUser.id, email: newUser.email, name: newUser.name, lname: newUser.lname } }, 'Signup successful.');
+  const response = new apiResponse(201, { user: { id: newUser.id, email: newUser.email, name: newUser.name, lname: newUser.lname }, accessToken }, 'Signup successful.');
   return res.status(201).json(response);
 
 });;
@@ -186,7 +186,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     path: '/',
   });
 
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob } }, 'login successful');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken }, 'login successful');
   return res.status(200).json(response);
 });
 
@@ -466,7 +466,7 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   });
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob } }, 'Login with Google successful.');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken }, 'Login with Google successful.');
   return res.status(200).json(response);
 }
 );

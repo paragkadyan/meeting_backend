@@ -1,8 +1,7 @@
-import cookie from "cookie";
-import { verifyAccessToken } from "../utils/jwt";
+import { verifyAccessToken, verifyRefreshToken } from "../utils/jwt";
 import { Socket } from "socket.io";
 
-export const socketAuth = (socket: Socket, next: (err?: Error) => void) => {
+export const socketAuth = async (socket: Socket, next: (err?: Error) => void) => {
   try {
     const raw = socket.handshake.headers.cookie;
     if (!raw) return next(new Error("No cookies"));
@@ -13,15 +12,37 @@ export const socketAuth = (socket: Socket, next: (err?: Error) => void) => {
       cookies[name] = valueParts.join('=');
     });
 
-    const token = cookies.accessToken;
+    const accessToken = cookies.accessToken;
+    const refreshToken = cookies.refreshToken;
 
-    if (!token) return next(new Error("No access token"));
+    if (!accessToken && !refreshToken) {
+      return next(new Error("No tokens provided"));
+    }
 
-    const decoded = verifyAccessToken(token);
+    // Try access token first
+    if (accessToken) {
+      try {
+        const decoded = verifyAccessToken(accessToken);
+        socket.data.user = { id: decoded.userId };
+        return next();
+      } catch (error) {
+        // Access token expired, try refresh token
+      }
+    }
 
-    socket.data.user = { id: decoded.userId };
-    next();
-  } catch {
+    // Fallback to refresh token
+    if (refreshToken) {
+      try {
+        const decoded = verifyRefreshToken(refreshToken);
+        socket.data.user = { id: decoded.userId };
+        return next();
+      } catch (error) {
+        return next(new Error("Invalid or expired tokens"));
+      }
+    }
+
     next(new Error("Unauthorized"));
+  } catch (error) {
+    next(new Error("Authentication failed"));
   }
 };
