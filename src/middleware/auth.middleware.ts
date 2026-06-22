@@ -20,7 +20,7 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
       req.user = { id: payload.userId };
       return next();
     } catch (error) {
-      throw new apiError(401, 'Access token expired');
+      // Access token expired or invalid, proceed to refresh token rotation
     }
   }
 
