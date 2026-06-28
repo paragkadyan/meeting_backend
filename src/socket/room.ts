@@ -50,9 +50,7 @@ export const handleRooms = (socket: Socket) => {
     socket.emit('roomUsers', { convoId, onlineUsers });
   });
 
-  socket.on('roomUpdate', async ({ convoId, data }) => {
-    socket.to(`room:${convoId}`).emit('roomUpdated', data);
-  });
+  // Removed insecure roomUpdate handler - use API endpoint /group-update instead
 
   socket.on('newMembersAdded', async ({ convoId, newMember }) => {
     socket.to(`room:${convoId}`).emit('membersAdded', {

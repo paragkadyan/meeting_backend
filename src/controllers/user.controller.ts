@@ -15,6 +15,19 @@ import { apiError } from '../utils/apiError';
 import { verifyGoogleToken } from '../utils/googleAuth';
 import { redis } from '../db/redis';
 
+const validateImageURL = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    const allowedDomains = ['res.cloudinary.com', 'cloudinary.com'];
+    return allowedDomains.some(domain => 
+      parsed.hostname === domain || parsed.hostname.endsWith('.' + domain)
+    );
+  } catch {
+    return false;
+  }
+};
+
 
 export const signup = asyncHandler(async (req: Request, res: Response) => {
   const { name, lname, email, password } = req.body;
@@ -354,8 +367,14 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   if (mobileNumber) {
     updateData.mobileNumber = mobileNumber;
   }
-  if (profileURL) {
-    updateData.profileURL = profileURL;
+  if (profileURL !== undefined) {
+    if (profileURL === null) {
+      updateData.profileURL = null;
+    } else if (profileURL && !validateImageURL(profileURL)) {
+      throw new apiError(400, "Invalid profile URL");
+    } else {
+      updateData.profileURL = profileURL;
+    }
   }
   if (lname) {
     updateData.lname = lname;
@@ -369,6 +388,37 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     where: { id: userId },
     data: updateData,
   });
+
+  // Emit socket event to notify other users about profile update
+  try {
+    const { getIO } = await import('../socket/index');
+    const io = getIO();
+    
+    // Get all conversations this user is part of
+    const userConversations = await prisma.conversationParticipant.findMany({
+      where: { userId: userId! },
+      select: { convoId: true }
+    });
+
+    // Emit to each conversation room so all members get notified
+    const profileUpdate = {
+      userId: user.id,
+      name: user.name,
+      lname: user.lname,
+      profileURL: user.profileURL,
+      email: user.email,
+      mobileNumber: user.mobileNumber,
+    };
+
+    userConversations.forEach((convo) => {
+      io.to(`room:${convo.convoId}`).emit('profileUpdated', profileUpdate);
+    });
+
+    // Also emit to user's own room for multi-device sync
+    io.to(`user:${userId}`).emit('profileUpdated', profileUpdate);
+  } catch (error) {
+    console.error('Failed to emit profileUpdated event:', error);
+  }
 
   const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Profile edited successfully.');
   return res.status(200).json(response);
@@ -385,15 +435,29 @@ export const deleteAccount = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const cloudinarySignature = asyncHandler(async (req: Request, res: Response) => {
-
   const userId = req.user?.id;
+  const { imageType, groupId } = req.query; // 'profile' or 'group'
+  
   const timestamp = Math.floor(Date.now() / 1000);
-  const folder = 'profile';
-  const paramstoSign = { timestamp, folder, public_id: `user_${userId}` };
+  
+  let folder: string;
+  let publicId: string;
+  
+  if (imageType === 'group' && groupId) {
+    // For group images
+    folder = 'groups';
+    publicId = `group_${groupId}`;
+  } else {
+    // Default to profile images
+    folder = 'profile';
+    publicId = `user_${userId}`;
+  }
+  
+  const paramstoSign = { timestamp, folder, public_id: publicId };
   const signature = generateSignature(paramstoSign);
   const { cloudName, api_key } = getCloudinaryConfig();
-  const response = new apiResponse(200, { user: { id: userId }, cloudinaryData: { cloudName, api_key, timestamp, signature, folder, public_id: `user_${userId}` } }, 'Cloudinary signature generated successfully.');
-  return res.json(response)
+  const response = new apiResponse(200, { user: { id: userId }, cloudinaryData: { cloudName, api_key, timestamp, signature, folder, public_id: publicId } }, 'Cloudinary signature generated successfully.');
+  return res.json(response);
 });
 
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
