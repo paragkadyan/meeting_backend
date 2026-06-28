@@ -7,6 +7,15 @@ import { handleMessages } from "./message";
 import { handleOfflineSync } from "./offline";
 import { socketAuth } from "../middleware/socket.auth";
 
+let ioInstance: Server | null = null;
+
+export const getIO = (): Server => {
+  if (!ioInstance) {
+    throw new Error('Socket.io not initialized');
+  }
+  return ioInstance;
+};
+
 export const initSocket = async (httpServer: import("http").Server) => {
   const io = new Server(httpServer, {
     cors: {
@@ -14,6 +23,8 @@ export const initSocket = async (httpServer: import("http").Server) => {
       credentials: true,
     },
   });
+
+  ioInstance = io;
 
   console.log("Socket.io initialized");
   const pub = redis;

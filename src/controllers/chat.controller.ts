@@ -5,6 +5,20 @@ import { apiError } from "../utils/apiError";
 import { v4 as uuidv4 } from "uuid";
 import { redis } from "../db/redis";
 import { prisma } from '../db/post';
+import { getIO } from '../socket/index';
+
+const validateImageURL = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    const allowedDomains = ['res.cloudinary.com', 'cloudinary.com'];
+    return allowedDomains.some(domain => 
+      parsed.hostname === domain || parsed.hostname.endsWith('.' + domain)
+    );
+  } catch {
+    return false;
+  }
+};
 
 
 export const createDirectChat = asyncHandler(async (req, res) => {
@@ -103,6 +117,10 @@ export const createGroupChat = asyncHandler(async (req, res) => {
 
   if (!groupName || !Array.isArray(participants)) {
     throw new apiError(400, "Invalid group chat data");
+  }
+
+  if (avatarURL && !validateImageURL(avatarURL)) {
+    throw new apiError(400, "Invalid avatar URL");
   }
   const blockRelations = await prisma.userBlock.findMany({
     where: {
@@ -342,7 +360,9 @@ export const getConversations = asyncHandler(async (req, res) => {
       leftAt: r.leftAt,
 
       name: convoIsBlocked ? "Blocked User" : r.conversation?.name ?? null,
-      avatarURL: convoIsBlocked ? null : r.conversation?.avatarURL ?? null,
+      // CRITICAL FIX: Only return avatarURL for groups, not direct chats
+      // Direct chats should use profileURL from User table
+      avatarURL: convoIsBlocked ? null : (r.convoType === "group" ? r.conversation?.avatarURL ?? null : null),
       description: convoIsBlocked ? null : r.conversation?.description ?? null,
       creatorId: convoIsBlocked ? null : r.conversation?.creatorId ?? null,
       adminIds: convoIsBlocked ? [] : adminIds,
@@ -698,18 +718,44 @@ export const groupUpdate = asyncHandler(async (req, res) => {
     throw new apiError(403, "Only group members can update the group");
   }
 
+  if (avatarURL && !validateImageURL(avatarURL)) {
+    throw new apiError(400, "Invalid avatar URL");
+  }
+
   const updateData: any = {};
   if (groupName !== undefined) updateData.name = groupName;
   if (avatarURL !== undefined) updateData.avatarURL = avatarURL;
   if (description !== undefined) updateData.description = description;
 
-  await prisma.conversation.update({
+  const updatedConvo = await prisma.conversation.update({
     where: { id: convoId },
     data: updateData,
+    select: {
+      name: true,
+      avatarURL: true,
+      description: true
+    }
   });
 
+  try {
+    const io = getIO();
+    io.to(`room:${convoId}`).emit('roomUpdated', {
+      convoId,
+      groupName: updatedConvo.name,
+      avatarURL: updatedConvo.avatarURL,
+      description: updatedConvo.description
+    });
+  } catch (error) {
+    console.error('Failed to emit socket event:', error);
+  }
+
   return res.status(200).json(
-    new apiResponse(200, { convoId }, "Group updated successfully")
+    new apiResponse(200, { 
+      convoId,
+      name: updatedConvo.name,
+      avatarURL: updatedConvo.avatarURL,
+      description: updatedConvo.description
+    }, "Group updated successfully")
   );
 });
 
