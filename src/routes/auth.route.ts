@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, cloudinarySignature, getProfile, loginWithGoogle, searchUser, inviteUser, feedback, refreshAccessToken } from '../controllers/user.controller';
+import { forgotPassword, login, signup, verifyResetOtp, resetPassword, verifySignupOTP, deleteAccount, editProfile, resendSignupOTP, logout, changePassword, getProfile, loginWithGoogle, searchUser, inviteUser, feedback, refreshAccessToken } from '../controllers/user.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { imageUploadMiddleware } from '../middleware/imageUpload.middleware';
 
 const router = Router();
 
@@ -42,16 +43,13 @@ router.route("/changePassword").put(
 )
 
 router.route("/editProfile").put(
-    authMiddleware, editProfile
+    authMiddleware, imageUploadMiddleware.single("profilePicture"), editProfile
 )
 
 router.route("/deleteAccount").delete(
     authMiddleware, deleteAccount
 )
 
-router.route("/cloudinarySignature").get(
-    authMiddleware, cloudinarySignature
-)
 
 router.route("/user/profile").get(
     authMiddleware, getProfile
