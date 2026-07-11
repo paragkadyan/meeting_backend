@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { addNewUsersToGroup, assignAdminRole, createDirectChat, createGroupChat, getConversations, getMessageReadReceipts, getMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, removeAdminRole, updateConversationPreferences, userLastSeen, } from '../controllers/chat.controller';
 import { blockUser, unblockUser } from '../controllers/user.controller';
+import { imageUploadMiddleware } from '../middleware/imageUpload.middleware';
 
 
 const router = Router();
@@ -12,7 +13,7 @@ router.route('/create-direct-chat').post(
 );
 
 router.route('/create-group-chat').post(
-    authMiddleware, createGroupChat
+    authMiddleware, imageUploadMiddleware.single("avatar"), createGroupChat
 );
 
 router.route('/get-conversations').get(
@@ -36,7 +37,7 @@ router.route(`/get-older-messages`).post(
 );
 
 router.route('/group-update').post(
-    authMiddleware, groupUpdate
+    authMiddleware, imageUploadMiddleware.single("avatar"), groupUpdate
 );
 
 router.route('/conversation-preferences').post(

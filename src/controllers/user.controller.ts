@@ -9,25 +9,11 @@ import { asyncHandler } from "../utils/asyncHandler";
 import { generateOTP, getOTP, genResetToken, getResetToken, clearOTP } from '../services/auth.service';
 import { sendTemplatedEmail } from '../services/email.service';
 import { clearSignupData, getSignupOTP, getTempSignupData, saveSignupOTP, saveTempSignupData } from '../services/tempUser.service';
-import { generateSignature, getCloudinaryConfig } from '../config/cloudinary';
 import { apiResponse } from '../utils/apiResponse';
 import { apiError } from '../utils/apiError';
 import { verifyGoogleToken } from '../utils/googleAuth';
 import { redis } from '../db/redis';
-
-const validateImageURL = (url: string): boolean => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:') return false;
-    const allowedDomains = ['res.cloudinary.com', 'cloudinary.com'];
-    return allowedDomains.some(domain => 
-      parsed.hostname === domain || parsed.hostname.endsWith('.' + domain)
-    );
-  } catch {
-    return false;
-  }
-};
-
+import { deleteProfilePicture, replaceProfilePicture } from '../services/minioAsset.service';
 
 export const signup = asyncHandler(async (req: Request, res: Response) => {
   const { name, lname, email, password } = req.body;
@@ -351,7 +337,17 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
 
 export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
-  const { name, location, dob, mobileNumber, profileURL, lname } = req.body;
+  const { name, location, dob, mobileNumber, lname } = req.body;
+  const file = req.file;
+
+  if (!userId) {
+    throw new apiError(401, 'Unauthorized');
+  }
+
+  const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+  if (!currentUser) {
+    throw new apiError(404, 'User not found');
+  }
 
   const updateData: any = {};
 
@@ -367,17 +363,16 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   if (mobileNumber) {
     updateData.mobileNumber = mobileNumber;
   }
-  if (profileURL !== undefined) {
-    if (profileURL === null) {
-      updateData.profileURL = null;
-    } else if (profileURL && !validateImageURL(profileURL)) {
-      throw new apiError(400, "Invalid profile URL");
-    } else {
-      updateData.profileURL = profileURL;
-    }
-  }
   if (lname) {
     updateData.lname = lname;
+  }
+  if (file) {
+    updateData.profileURL = await replaceProfilePicture(userId, file, currentUser.profileURL);
+  } else if (req.body.profileURL === null || req.body.profileURL === 'null') {
+    await deleteProfilePicture(currentUser.profileURL);
+    updateData.profileURL = null;
+  } else if (req.body.profileURL !== undefined) {
+    throw new apiError(400, 'Upload profile pictures as multipart file field "profilePicture"');
   }
 
   if (Object.keys(updateData).length === 0) {
@@ -426,37 +421,13 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
 
 export const deleteAccount = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.id;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { profileURL: true } });
+  await deleteProfilePicture(user?.profileURL);
   await prisma.user.delete({ where: { id: userId } });
   await revokeAllOnCompromise(userId!);
   res.clearCookie('accessToken', { path: '/' });
   res.clearCookie('refreshToken', { path: '/' });
   const response = new apiResponse(200, {}, 'Account deleted successfully.');
-  return res.json(response);
-});
-
-export const cloudinarySignature = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user?.id;
-  const { imageType, groupId } = req.query; // 'profile' or 'group'
-  
-  const timestamp = Math.floor(Date.now() / 1000);
-  
-  let folder: string;
-  let publicId: string;
-  
-  if (imageType === 'group' && groupId) {
-    // For group images
-    folder = 'groups';
-    publicId = `group_${groupId}`;
-  } else {
-    // Default to profile images
-    folder = 'profile';
-    publicId = `user_${userId}`;
-  }
-  
-  const paramstoSign = { timestamp, folder, public_id: publicId };
-  const signature = generateSignature(paramstoSign);
-  const { cloudName, api_key } = getCloudinaryConfig();
-  const response = new apiResponse(200, { user: { id: userId }, cloudinaryData: { cloudName, api_key, timestamp, signature, folder, public_id: publicId } }, 'Cloudinary signature generated successfully.');
   return res.json(response);
 });
 
@@ -502,7 +473,6 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
         email: googleUser.email,
         name: googleUser.name,
         googleId: googleUser.googleId,
-        profileURL: googleUser.picture,
         authProvider: "GOOGLE",
       },
     });

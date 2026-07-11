@@ -6,20 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { redis } from "../db/redis";
 import { prisma } from '../db/post';
 import { getIO } from '../socket/index';
-
-const validateImageURL = (url: string): boolean => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:') return false;
-    const allowedDomains = ['res.cloudinary.com', 'cloudinary.com'];
-    return allowedDomains.some(domain => 
-      parsed.hostname === domain || parsed.hostname.endsWith('.' + domain)
-    );
-  } catch {
-    return false;
-  }
-};
-
+import { replaceGroupAvatar } from '../services/minioAsset.service';
 
 export const createDirectChat = asyncHandler(async (req, res) => {
   const { participants, creatorID } = req.body;
@@ -109,9 +96,9 @@ export const createGroupChat = asyncHandler(async (req, res) => {
   const {
     groupName,
     participants,
-    avatarURL,
     description,
   } = req.body;
+  const avatarFile = req.file;
 
   const creatorID = req.user!.id;
 
@@ -119,9 +106,6 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     throw new apiError(400, "Invalid group chat data");
   }
 
-  if (avatarURL && !validateImageURL(avatarURL)) {
-    throw new apiError(400, "Invalid avatar URL");
-  }
   const blockRelations = await prisma.userBlock.findMany({
     where: {
       OR: [
@@ -173,7 +157,6 @@ export const createGroupChat = asyncHandler(async (req, res) => {
         type: "group",
         name: groupName,
         creatorId: creatorID,
-        avatarURL: avatarURL ?? null,
         description: description ?? null,
       },
     });
@@ -196,6 +179,14 @@ export const createGroupChat = asyncHandler(async (req, res) => {
 
     return convo;
   });
+
+  if (avatarFile) {
+    const avatarURL = await replaceGroupAvatar(conversation.id, avatarFile);
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { avatarURL },
+    });
+  }
 
   await redis.sAdd(
     `convo:${conversation.id}:participants`,
@@ -697,7 +688,8 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
 
 
 export const groupUpdate = asyncHandler(async (req, res) => {
-  const { convoId, groupName, avatarURL, description } = req.body;
+  const { convoId, groupName, description } = req.body;
+  const avatarFile = req.file;
   if (!convoId) {
     throw new apiError(400, "convoId is required");
   }
@@ -718,13 +710,13 @@ export const groupUpdate = asyncHandler(async (req, res) => {
     throw new apiError(403, "Only group members can update the group");
   }
 
-  if (avatarURL && !validateImageURL(avatarURL)) {
-    throw new apiError(400, "Invalid avatar URL");
-  }
 
   const updateData: any = {};
   if (groupName !== undefined) updateData.name = groupName;
-  if (avatarURL !== undefined) updateData.avatarURL = avatarURL;
+  if (avatarFile) updateData.avatarURL = await replaceGroupAvatar(convoId, avatarFile, convo.avatarURL);
+  if (req.body.avatarURL !== undefined && !avatarFile) {
+    throw new apiError(400, 'Upload group avatars as multipart file field "avatar"');
+  }
   if (description !== undefined) updateData.description = description;
 
   const updatedConvo = await prisma.conversation.update({
