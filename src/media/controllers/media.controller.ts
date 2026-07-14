@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { apiError } from "../../utils/apiError";
 import { asyncHandler } from "../../utils/asyncHandler";
 import { deleteMedia, resolveBatchFileAccess, resolveSecureFileAccess, uploadMedia } from "../services/media.service";
+import { resolveBatchGroupAvatarAccess, resolveBatchProfilePictureAccess } from "../../services/minioAsset.service";
 
 export const uploadFileController = asyncHandler(async (req: Request, res: Response) => {
   const file = req.file;
@@ -56,6 +57,38 @@ export const getBatchFilesController = asyncHandler(async (req: Request, res: Re
   }
 
   const data = await resolveBatchFileAccess(uniqueIds, req.user.id);
+  res.status(200).json({ success: true, data });
+});
+
+export const getBatchProfilePicturesController = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.id) {
+    throw new apiError(401, "Unauthorized");
+  }
+
+  const userIds = Array.isArray(req.body.userIds) ? (req.body.userIds as unknown[]) : [];
+  const uniqueIds = [...new Set(userIds.map((id: unknown) => String(id)).filter(Boolean))];
+
+  if (!uniqueIds.length) {
+    throw new apiError(400, "userIds is required");
+  }
+
+  const data = await resolveBatchProfilePictureAccess(uniqueIds);
+  res.status(200).json({ success: true, data });
+});
+
+export const getBatchGroupAvatarsController = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user?.id) {
+    throw new apiError(401, "Unauthorized");
+  }
+
+  const conversationIds = Array.isArray(req.body.conversationIds) ? (req.body.conversationIds as unknown[]) : [];
+  const uniqueIds = [...new Set(conversationIds.map((id: unknown) => String(id)).filter(Boolean))];
+
+  if (!uniqueIds.length) {
+    throw new apiError(400, "conversationIds is required");
+  }
+
+  const data = await resolveBatchGroupAvatarAccess(uniqueIds, req.user.id);
   res.status(200).json({ success: true, data });
 });
 

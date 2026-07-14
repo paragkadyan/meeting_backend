@@ -1,5 +1,7 @@
 import path from "path";
+import { prisma } from "../db/post";
 import { minioClient, bucketName } from "../config/minio";
+import { getPresignedGetUrl } from "../media/services/storage.service";
 
 const PROFILE_PREFIX = "profile-pictures";
 const GROUP_AVATAR_PREFIX = "group-avatars";
@@ -34,6 +36,14 @@ function extensionForMimeType(mimeType: string, originalName: string): string {
 
 function isManagedAssetKey(value: string | null | undefined, prefix: string): value is string {
   return typeof value === "string" && value.startsWith(`${prefix}/`);
+}
+
+async function getManagedAssetPresignedUrl(objectKey: string | null | undefined, prefix: string): Promise<string | null> {
+  if (!isManagedAssetKey(objectKey, prefix)) {
+    return null;
+  }
+
+  return getPresignedGetUrl(objectKey);
 }
 
 async function uploadManagedImage(params: {
@@ -109,4 +119,62 @@ export async function deleteGroupAvatar(objectKey?: string | null): Promise<void
   if (isManagedAssetKey(objectKey, GROUP_AVATAR_PREFIX)) {
     await minioClient.removeObject(bucketName, objectKey);
   }
+}
+
+export async function resolveBatchProfilePictureAccess(userIds: string[]): Promise<Array<{ userId: string; profileURL: string | null; presignedUrl: string | null }>> {
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  if (!uniqueUserIds.length) {
+    return [];
+  }
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: uniqueUserIds } },
+    select: { id: true, profileURL: true },
+  });
+
+  return Promise.all(
+    users.map(async (user) => ({
+      userId: user.id,
+      profileURL: user.profileURL,
+      presignedUrl: await getManagedAssetPresignedUrl(user.profileURL, PROFILE_PREFIX),
+    }))
+  );
+}
+
+export async function resolveBatchGroupAvatarAccess(
+  conversationIds: string[],
+  viewerId: string
+): Promise<Array<{ conversationId: string; avatarURL: string | null; presignedUrl: string | null; error?: string }>> {
+  const uniqueConversationIds = [...new Set(conversationIds.filter(Boolean))];
+  if (!uniqueConversationIds.length) {
+    return [];
+  }
+
+  const conversations = await prisma.conversation.findMany({
+    where: { id: { in: uniqueConversationIds } },
+    select: { id: true, avatarURL: true },
+  });
+
+  return Promise.all(
+    conversations.map(async (conversation) => {
+      const participant = await prisma.conversationParticipant.findFirst({
+        where: { convoId: conversation.id, userId: viewerId },
+      });
+
+      if (!participant) {
+        return {
+          conversationId: conversation.id,
+          avatarURL: conversation.avatarURL,
+          presignedUrl: null,
+          error: "forbidden",
+        };
+      }
+
+      return {
+        conversationId: conversation.id,
+        avatarURL: conversation.avatarURL,
+        presignedUrl: await getManagedAssetPresignedUrl(conversation.avatarURL, GROUP_AVATAR_PREFIX),
+      };
+    })
+  );
 }
