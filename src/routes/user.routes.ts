@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth.middleware';
 import { addNewUsersToGroup, assignAdminRole, createDirectChat, createGroupChat, getConversations, getMessageReadReceipts, getMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, removeAdminRole, updateConversationPreferences, userLastSeen, } from '../controllers/chat.controller';
 import { blockUser, unblockUser } from '../controllers/user.controller';
 import { imageUploadMiddleware } from '../middleware/imageUpload.middleware';
+import { deletePushSubscription, registerPushSubscription, updatePushSubscription } from '../controllers/pushSubscription.controller';
 
 
 const router = Router();
@@ -78,6 +79,18 @@ router.route('/block-user').post(
 
 router.route('/unblock-user').post(
     authMiddleware, unblockUser
+);
+
+router.route('/push-subscriptions').post(
+    authMiddleware, registerPushSubscription
+);
+
+router.route('/push-subscriptions/:subscriptionId').put(
+    authMiddleware, updatePushSubscription
+);
+
+router.route('/push-subscriptions/:subscriptionId').delete(
+    authMiddleware, deletePushSubscription
 );
 
 export default router;
