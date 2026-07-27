@@ -1,6 +1,7 @@
 import { Socket, Server } from 'socket.io';
 import { cassandra } from '../db/cassa';
 import { redis } from '../db/redis';
+import { addActiveConversationViewer, removeActiveConversationViewer } from './activeConversation';
 
 export const handleRooms = (socket: Socket) => {
   const userId = socket.data.user.id;
@@ -19,6 +20,7 @@ export const handleRooms = (socket: Socket) => {
     }
 
     socket.join(`room:${convoId}`);
+    await addActiveConversationViewer(userId, convoId, socket.id);
 
     socket.to(`room:${convoId}`).emit('userJoined', {
       userId,
@@ -42,6 +44,7 @@ export const handleRooms = (socket: Socket) => {
 
   socket.on('leaveRoom', async ({ convoId }) => {
     socket.leave(`room:${convoId}`);
+    await removeActiveConversationViewer(userId, convoId, socket.id);
     socket.to(`room:${convoId}`).emit('userLeft', { userId, convoId });
   });
 

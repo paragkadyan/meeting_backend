@@ -3,6 +3,8 @@ import { types } from 'cassandra-driver';
 import { cassandra } from '../db/cassa';
 import { redis } from '../db/redis';
 import { prisma } from '../db/post';
+import { pushNotificationService } from '../services/pushNotification.service';
+import { logger } from '../logger/logger';
 
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
@@ -108,6 +110,8 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       }
 
       const uniqueParticipants = Array.from(new Set(participants.map(p => String(p))));
+      const pushNotificationTasks: Promise<void>[] = [];
+
       for (const participantId of uniqueParticipants) {
         io.to(`user:${participantId}`).emit('newMessage', { ...message, messageId: messageId.toString(), });
         const unreadKey = `unread:${participantId}:${convoId}`;
@@ -128,6 +132,26 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         socket.to(`user:${participantId}`).emit('unreadUpdated', {
           convoId,
           unreadCount,
+        });
+
+        if (participantId !== userId) {
+          const [isOnline, isActivelyViewing] = await Promise.all([
+            redis.exists(`user:online:${participantId}`),
+            redis.sIsMember(`convo:${convoId}:activeViewers`, participantId),
+          ]);
+
+          if (!isOnline || !isActivelyViewing) {
+            pushNotificationTasks.push(pushNotificationService.sendNewMessageNotification(participantId));
+          }
+        }
+      }
+
+      if (pushNotificationTasks.length > 0) {
+        Promise.allSettled(pushNotificationTasks).then((results) => {
+          const failed = results.filter((result) => result.status === 'rejected').length;
+          if (failed > 0) {
+            logger.warn('One or more push notification tasks failed after message creation', { failed, total: results.length });
+          }
         });
       }
       //socket.to(`room:${convoId}`).emit('newMessage', message);
