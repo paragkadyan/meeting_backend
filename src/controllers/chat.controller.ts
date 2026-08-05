@@ -701,15 +701,17 @@ export const groupUpdate = asyncHandler(async (req, res) => {
   }
   const userId = req.user!.id;
 
-  const participant = await prisma.conversationParticipant.findUnique({
+ const participant = await prisma.conversationParticipant.findUnique({
     where: {
-      convoId_userId: { convoId, userId },
+      convoId_userId: {
+        convoId,
+        userId,
+      },
     },
   });
-  if (!participant) {
-    throw new apiError(403, "Only group members can update the group");
+  if (!participant || participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can update group details");
   }
-
 
   const updateData: any = {};
   if (groupName !== undefined) updateData.name = groupName;
@@ -883,6 +885,19 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   if (!convo || convo.type !== "group") {
     throw new apiError(404, "Group conversation not found");
   }
+  
+ const participant = await prisma.conversationParticipant.findUnique({
+    where: {
+      convoId_userId: {
+        convoId,
+        userId,
+      },
+    },
+  });
+  if (!participant || participant.role !== "admin") {
+    throw new apiError(403, "Only group admins can add members");
+  }
+
   const blockRelations = await prisma.userBlock.findMany({
     where: {
       OR: [
@@ -918,19 +933,6 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
 
   if (validParticipants.length !== newUserIds.length) {
     throw new apiError(400, "Cannot add blocked users to group");
-  }
-
-  const participant = await prisma.conversationParticipant.findUnique({
-    where: {
-      convoId_userId: {
-        convoId,
-        userId,
-      },
-    },
-  });
-
-  if (!participant ) {
-    throw new apiError(403, "Only group members can add new users");
   }
 
   const convoUsers = await prisma.conversationByUser.findMany({
