@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { addNewUsersToGroup, assignAdminRole, createDirectChat, createGroupChat, getConversations, getMessageReadReceipts, getMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, removeAdminRole, updateConversationPreferences, userLastSeen, } from '../controllers/chat.controller';
+import { addNewUsersToGroup, assignAdminRole, createDirectChat, createGroupChat, deleteChatForUser, getConversations, getMessageReadReceipts, getMessages, getMessagesAround, getNewerMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, removeAdminRole, updateConversationPreferences, userLastSeen, } from '../controllers/chat.controller';
 import { blockUser, unblockUser } from '../controllers/user.controller';
 import { imageUploadMiddleware } from '../middleware/imageUpload.middleware';
 import { deletePushSubscription, registerPushSubscription, updatePushSubscription } from '../controllers/pushSubscription.controller';
@@ -35,6 +35,14 @@ router.route('/last-seen').post(
 
 router.route(`/get-older-messages`).post(
     authMiddleware, getOlderMessages
+);
+
+router.route('/get-newer-messages').post(
+    authMiddleware, getNewerMessages
+);
+
+router.route('get-messages-around').post(
+    authMiddleware, getMessagesAround
 );
 
 router.route('/group-update').post(
@@ -91,6 +99,10 @@ router.route('/push-subscriptions/:subscriptionId').put(
 
 router.route('/push-subscriptions/:subscriptionId').delete(
     authMiddleware, deletePushSubscription
+);
+
+router.route('/delete-chat').delete(
+    authMiddleware, deleteChatForUser
 );
 
 export default router;

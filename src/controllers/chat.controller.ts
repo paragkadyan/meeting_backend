@@ -7,16 +7,114 @@ import { redis } from "../db/redis";
 import { prisma } from '../db/post';
 import { getIO } from '../socket/index';
 import { replaceGroupAvatar } from '../services/minioAsset.service';
+import { types } from "cassandra-driver";
 
 export const createDirectChat = asyncHandler(async (req, res) => {
   const { participants, creatorID } = req.body;
 
-  if (!Array.isArray(participants) || participants.length !== 2) {
-    throw new apiError(400, "Direct chat must have exactly 2 participants");
+  if (!Array.isArray(participants)) {
+    throw new apiError(400, "Participants must be an array");
   }
 
   if (!participants.includes(creatorID)) {
     throw new apiError(400, "Creator must be a participant");
+  }
+
+  // =========================
+  // SELF CHAT
+  // =========================
+  const isSelfChat =
+    participants.length === 1 ||
+    (participants.length === 2 &&
+      participants[0] === creatorID &&
+      participants[1] === creatorID);
+
+  if (isSelfChat) {
+    const result = await prisma.$transaction(async (tx) => {
+      // Check if self-chat already exists
+      const existing = await tx.conversation.findFirst({
+        where: {
+          type: "self",
+          creatorId: creatorID,
+          participants: {
+            some: {
+              userId: creatorID,
+            },
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (existing) {
+        return {
+          convoId: existing.id,
+          existed: true,
+        };
+      }
+
+      const conversation = await tx.conversation.create({
+        data: {
+          type: "self",
+          creator: {
+            connect: {
+              id: creatorID,
+            },
+          },
+        },
+      });
+
+      // Only ONE participant row
+      await tx.conversationParticipant.create({
+        data: {
+          convoId: conversation.id,
+          userId: creatorID,
+          role: "member",
+        },
+      });
+
+      await tx.conversationByUser.create({
+        data: {
+          userId: creatorID,
+          convoId: conversation.id,
+          convoType: "self",
+          isActive: true,
+          unreadCount: 0,
+        },
+      });
+
+      return {
+        convoId: conversation.id,
+        existed: false,
+      };
+    });
+
+    await redis.sAdd(
+      `convo:${result.convoId}:participants`,
+      creatorID
+    );
+
+    return res.status(result.existed ? 200 : 201).json(
+      new apiResponse(
+        result.existed ? 200 : 201,
+        { convoId: result.convoId },
+        result.existed
+          ? "Self chat already exists"
+          : "Self chat created successfully"
+      )
+    );
+  }
+
+  // =========================
+  // NORMAL DIRECT CHAT
+  // =========================
+
+  if (participants.length !== 2) {
+    throw new apiError(
+      400,
+      "Direct chat must have exactly 2 participants"
+    );
   }
 
   const [u1, u2] = [...participants].sort();
@@ -25,10 +123,16 @@ export const createDirectChat = asyncHandler(async (req, res) => {
   const isBlocked = await prisma.userBlock.findFirst({
     where: {
       OR: [
-        { blockerId: u1, blockedId: u2 },
-        { blockerId: u2, blockedId: u1 }
-      ]
-    }
+        {
+          blockerId: u1,
+          blockedId: u2,
+        },
+        {
+          blockerId: u2,
+          blockedId: u1,
+        },
+      ],
+    },
   });
 
   if (isBlocked) {
@@ -37,22 +141,29 @@ export const createDirectChat = asyncHandler(async (req, res) => {
 
   const result = await prisma.$transaction(async (tx) => {
     const existing = await tx.directChatLookup.findUnique({
-      where: { pairKey }
+      where: {
+        pairKey,
+      },
     });
 
     if (existing) {
-      return { convoId: existing.convoId, existed: true };
+      return {
+        convoId: existing.convoId,
+        existed: true,
+      };
     }
 
     const conversation = await tx.conversation.create({
       data: {
         type: "direct",
-
         creator: {
-          connect: { id: creatorID },
+          connect: {
+            id: creatorID,
+          },
         },
       },
     });
+
     await tx.conversationParticipant.createMany({
       data: participants.map((userId) => ({
         convoId: conversation.id,
@@ -60,6 +171,7 @@ export const createDirectChat = asyncHandler(async (req, res) => {
         role: "member",
       })),
     });
+
     await tx.conversationByUser.createMany({
       data: participants.map((userId) => ({
         userId,
@@ -69,6 +181,7 @@ export const createDirectChat = asyncHandler(async (req, res) => {
         unreadCount: 0,
       })),
     });
+
     await tx.directChatLookup.create({
       data: {
         pairKey,
@@ -76,19 +189,33 @@ export const createDirectChat = asyncHandler(async (req, res) => {
       },
     });
 
-    return { convoId: conversation.id, existed: false };
+    return {
+      convoId: conversation.id,
+      existed: false,
+    };
   });
 
   if (result.existed) {
     return res.status(200).json(
-      new apiResponse(200, { convoId: result.convoId }, "Direct chat already exists")
+      new apiResponse(
+        200,
+        { convoId: result.convoId },
+        "Direct chat already exists"
+      )
     );
   }
 
-  await redis.sAdd(`convo:${result.convoId}:participants`, participants);
+  await redis.sAdd(
+    `convo:${result.convoId}:participants`,
+    participants
+  );
 
   return res.status(201).json(
-    new apiResponse(201, { convoId: result.convoId }, "Conversation created successfully")
+    new apiResponse(
+      201,
+      { convoId: result.convoId },
+      "Conversation created successfully"
+    )
   );
 });
 
@@ -390,15 +517,70 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
  }
 }
 
+const getMessageReactions = async (
+  convoId: string,
+  messageIds: any[]
+) => {
+  if (messageIds.length === 0) {
+    return new Map<string, Record<string, string[]>>();
+  }
+
+  const result = await cassandra.execute(
+    `
+    SELECT messageID, userID, reaction
+    FROM message_reactions
+    WHERE convoID = ?
+      AND messageID IN ?;
+    `,
+    [convoId, messageIds],
+    { prepare: true }
+  );
+
+  const reactionMap = new Map<string, Record<string, string[]>>();
+
+  for (const row of result.rows) {
+    const messageId = row.messageid.toString();
+
+    if (!reactionMap.has(messageId)) {
+      reactionMap.set(messageId, {});
+    }
+
+    const reactions = reactionMap.get(messageId)!;
+
+    if (!reactions[row.reaction]) {
+      reactions[row.reaction] = [];
+    }
+
+    reactions[row.reaction].push(row.userid.toString());
+  }
+
+  return reactionMap;
+};
 
 export const getMessages = asyncHandler(async (req, res) => {
   const { convoId } = req.body;
   const unreadCount = await redis.get(`convo:${convoId}:user:${req.user!.id}:unreadCount`);
-  const limit = Math.max((Number(unreadCount)+10) || 50);
+  const unread = Number(unreadCount) || 0;
+  const limit = Math.min(Math.max(unread + 10, 30), 100);
 
   if (!convoId) {
     throw new apiError(400, "convoId is required");
   }
+
+  // Get this user's chat deletion boundary.
+  const convoState = await prisma.conversationByUser.findUnique({
+    where: {
+      userId_convoId: {
+        userId: req.user!.id,
+        convoId,
+      },
+    },
+    select: {
+      deletedMessageId: true,
+    },
+  });
+
+  const deletedMessageId = convoState?.deletedMessageId ?? null;
 
   const dayMs = 24 * 60 * 60 * 1000;
   const nowBucket = Math.floor(Date.now() / dayMs);
@@ -406,29 +588,81 @@ export const getMessages = asyncHandler(async (req, res) => {
   const msgs: any[] = [];
   const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30);
 
-  const query = `
-    SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-           isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID 
-    FROM messages
-    WHERE convoID = ?
-      AND bucket = ?
-    LIMIT ?;
-  `;
+  let deletedMessageBucket: number | null = null;
+
+  // Determine the bucket containing the deletion boundary.
+  if (deletedMessageId) {
+    const deletedMessageTime = types.TimeUuid.fromString(deletedMessageId).getDate();
+    deletedMessageBucket = Math.floor(deletedMessageTime.getTime() / dayMs);
+  }
 
   for (let i = 0; i < lookbackDays && msgs.length < limit; i++) {
     const bucket = nowBucket - i;
+
     if (bucket < 0) break;
+
+    // If this entire bucket is older than the deletion boundary,
+    // don't fetch it at all.
+    if (
+      deletedMessageBucket !== null &&
+      bucket < deletedMessageBucket
+    ) {
+      break;
+    }
 
     const remaining = limit - msgs.length;
 
-    const result = await cassandra.execute(
-      query,
-      [convoId, bucket, remaining],
-      { prepare: true }
-    );
+    let result;
+
+    // For the bucket containing deletedMessageId, only fetch messages
+    // newer than the deletion boundary.
+    if (
+      deletedMessageId &&
+      bucket === deletedMessageBucket
+    ) {
+      const query = `
+        SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
+               isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,
+               toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
+        FROM messages
+        WHERE convoID = ?
+          AND bucket = ?
+          AND messageID > ?
+        LIMIT ?;
+      `;
+
+      result = await cassandra.execute(
+        query,
+        [
+          convoId,
+          bucket,
+          types.TimeUuid.fromString(deletedMessageId),
+          remaining,
+        ],
+        { prepare: true }
+      );
+    } else {
+      const query = `
+        SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
+               isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,
+               toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
+        FROM messages
+        WHERE convoID = ?
+          AND bucket = ?
+        LIMIT ?;
+      `;
+
+      result = await cassandra.execute(
+        query,
+        [convoId, bucket, remaining],
+        { prepare: true }
+      );
+    }
+
     for (const row of result.rows) {
       if (!row.isdeleted) {
         msgs.push(row);
+
         if (msgs.length === limit) break;
       }
     }
@@ -438,36 +672,11 @@ export const getMessages = asyncHandler(async (req, res) => {
     return b.messageid.getDate().getTime() - a.messageid.getDate().getTime();
   });
 
-   const reactionQuery = `
-    SELECT messageID, reaction, userID
-    FROM message_reactions
-    WHERE convoID = ?
-      AND messageID = ?;
-  `;
+  const messageIds = msgs.map(msg => msg.messageid);
 
-  const reactionMap = new Map<string,Record<string, string[]>>();
-
-  await Promise.all(
-    msgs.map(async (msg) => {
-      const result = await cassandra.execute(
-        reactionQuery,
-        [convoId, msg.messageid],
-        { prepare: true }
-      );
-
-      if (!reactionMap.has(msg.messageid.toString())) {
-        reactionMap.set(msg.messageid.toString(), {});
-      }
-
-      const reactions = reactionMap.get(msg.messageid.toString())!;
-
-      for (const row of result.rows) {
-        if (!reactions[row.reaction]) {
-          reactions[row.reaction] = [];
-        }
-        reactions[row.reaction].push(row.userid.toString());
-      }
-    })
+  const reactionMap = await getMessageReactions(
+    convoId,
+    messageIds
   );
 
   const messages = msgs.map((msg) => ({
@@ -491,11 +700,11 @@ export const getMessages = asyncHandler(async (req, res) => {
   }));
 
   const messagesToRead = msgs
-  .filter(msg => msg.senderid && msg.senderid.toString() !== req.user!.id.toString())
-  .map(msg => msg.messageid.toString());
+    .filter(msg => msg.senderid && msg.senderid.toString() !== req.user!.id.toString())
+    .map(msg => msg.messageid.toString());
 
   if (Number(unreadCount) > 0) {
-    markmessagesAsRead(convoId, req.user!.id, messagesToRead);
+    await markmessagesAsRead(convoId, req.user!.id, messagesToRead);
   }
 
   return res.status(200).json(
@@ -561,7 +770,23 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
       .json(new apiResponse(400, null, "Missing pagination params"));
   }
 
+  // Get the user's delete cutoff for this conversation
+  const convoState = await prisma.conversationByUser.findUnique({
+    where: {
+      userId_convoId: {
+        userId: req.user!.id,
+        convoId,
+      },
+    },
+    select: {
+      deletedMessageId: true,
+    },
+  });
+
+  const deletedMessageId = convoState?.deletedMessageId || null;
+
   const messages: any[] = [];
+
   let bucket = Number(lastBucket);
   let remaining = limit;
 
@@ -599,20 +824,31 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
       convoId,
       bucket,
       lastMessageId,
-      remaining * FETCH_MULTIPLIER
+      remaining * FETCH_MULTIPLIER,
     ],
     { prepare: true }
   );
 
   for (const row of sameBucketResult.rows) {
-    if (!row.isdeleted) {
+
+    // Hide messages that existed before the user deleted the chat
+    if (
+      !row.isdeleted &&
+      (!deletedMessageId ||
+        row.messageid.toString() > deletedMessageId)
+    ) {
       messages.push(row);
       remaining--;
     }
+
     if (remaining === 0) break;
   }
 
-  while (remaining > 0 && bucket > 0 && scannedBuckets < MAX_BUCKET_SCAN) {
+  while (
+    remaining > 0 &&
+    bucket > 0 &&
+    scannedBuckets < MAX_BUCKET_SCAN
+  ) {
     bucket--;
     scannedBuckets++;
 
@@ -621,7 +857,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
       [
         convoId,
         bucket,
-        remaining * FETCH_MULTIPLIER
+        remaining * FETCH_MULTIPLIER,
       ],
       { prepare: true }
     );
@@ -629,10 +865,17 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     if (olderResult.rows.length === 0) continue;
 
     for (const row of olderResult.rows) {
-      if (!row.isdeleted) {
+
+      // Hide messages that existed before the user deleted the chat
+      if (
+        !row.isdeleted &&
+        (!deletedMessageId ||
+          row.messageid.toString() > deletedMessageId)
+      ) {
         messages.push(row);
         remaining--;
       }
+
       if (remaining === 0) break;
     }
   }
@@ -643,49 +886,441 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     );
   }
 
-  const messageIds = messages.map(m => m.messageid);
-
-  const reactionsQuery = `
-    SELECT convoID, messageID, userID, reaction
-    FROM message_reactions
-    WHERE convoID = ?
-      AND messageID IN ?;
-  `;
-
-  let reactionsResult = { rows: [] as any[] };
-
-  reactionsResult = await cassandra.execute(
-    reactionsQuery,
-    [convoId, messageIds],
-    { prepare: true }
+  // Get reactions for all fetched messages
+  const messageIds = messages.map(
+    (msg) => msg.messageid
   );
 
-  const reactionMap = new Map<string, Record<string, string[]>>();
+  const reactionMap = await getMessageReactions(
+    convoId,
+    messageIds
+  );
 
-  for (const row of reactionsResult.rows) {
-    const msgId = row.messageid.toString();
-    if (!reactionMap.has(msgId)) {
-      reactionMap.set(msgId, {});
-    }
+  // Format response
+  const formattedMessages = messages.map((msg) => ({
+    messageId: msg.messageid.toString(),
+    convoId: msg.convoid.toString(),
+    senderId: msg.senderid.toString(),
+    content: msg.content,
+    bucket: msg.bucket,
+    messageType: msg.messagetype,
+    attachments: msg.attachments,
+    replyToMessageId: msg.replytomessageid,
+    isEdited: msg.isedited,
+    editedAt: msg.editedat,
+    isDeleted: msg.isdeleted,
+    deletedAt: msg.deletedat,
+    createdAt: msg.createdat,
 
-    const msgReactions = reactionMap.get(msgId)!;
+    reactions:
+      reactionMap.get(msg.messageid.toString()) || {},
 
-    if (!msgReactions[row.reaction]) {
-      msgReactions[row.reaction] = [];
-    }
-
-    msgReactions[row.reaction].push(row.userid.toString());
-  }
-
-  for (const msg of messages) {
-    msg.reactions = reactionMap.get(msg.messageid.toString()) || {};
-  }
+    systemType: msg.systemtype,
+    actorId: msg.actorid
+      ? msg.actorid.toString()
+      : null,
+    targetUserId: msg.targetuserid
+      ? msg.targetuserid.toString()
+      : null,
+  }));
 
   return res.status(200).json(
-    new apiResponse(200, messages, "Older messages fetched")
+    new apiResponse(
+      200,
+      formattedMessages,
+      "Older messages fetched"
+    )
   );
 });
 
+export const getNewerMessages = asyncHandler(async (req, res) => {
+  const { convoId, lastMessageId, lastBucket } = req.body;
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+
+  if (!convoId || !lastMessageId || lastBucket === undefined) {
+    return res
+      .status(400)
+      .json(new apiResponse(400, null, "Missing pagination params"));
+  }
+
+  // Get this user's chat deletion point
+  const convoState = await prisma.conversationByUser.findUnique({
+    where: {
+      userId_convoId: {
+        userId: req.user!.id,
+        convoId,
+      },
+    },
+    select: {
+      deletedMessageId: true,
+    },
+  });
+
+  const deletedMessageId = convoState?.deletedMessageId ?? null;
+
+  const messages: any[] = [];
+
+  let bucket = Number(lastBucket);
+  let remaining = limit;
+
+  const MAX_BUCKET_SCAN = 5;
+  let scannedBuckets = 0;
+  const FETCH_MULTIPLIER = 2;
+
+  // Messages newer than lastMessageId in the same bucket
+  const sameBucketQuery = `
+    SELECT convoID, bucket, messageID, senderID, content, messageType,
+           attachments, isEdited, editedAt, isDeleted, deletedAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+      AND messageID > ?
+    LIMIT ?;
+  `;
+
+  // Messages from newer buckets
+  const newerBucketQuery = `
+    SELECT convoID, bucket, messageID, senderID, content, messageType,
+           attachments, isEdited, editedAt, isDeleted, deletedAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+    LIMIT ?;
+  `;
+
+  // 1. Get newer messages from the same bucket
+  const sameBucketResult = await cassandra.execute(
+    sameBucketQuery,
+    [
+      convoId,
+      bucket,
+      lastMessageId,
+      remaining * FETCH_MULTIPLIER,
+    ],
+    { prepare: true }
+  );
+
+  for (const row of sameBucketResult.rows) {
+    if (row.isdeleted) continue;
+
+    // If user deleted the chat, don't return messages
+    // at or before their deletion point.
+    if (
+      deletedMessageId &&
+      row.messageid.toString() <= deletedMessageId
+    ) {
+      continue;
+    }
+
+    messages.push(row);
+    remaining--;
+
+    if (remaining === 0) break;
+  }
+
+  // 2. Move into newer buckets if required
+  while (
+    remaining > 0 &&
+    scannedBuckets < MAX_BUCKET_SCAN
+  ) {
+    bucket++;
+    scannedBuckets++;
+
+    const newerResult = await cassandra.execute(
+      newerBucketQuery,
+      [
+        convoId,
+        bucket,
+        remaining * FETCH_MULTIPLIER,
+      ],
+      { prepare: true }
+    );
+
+    if (newerResult.rows.length === 0) {
+      continue;
+    }
+
+    for (const row of newerResult.rows) {
+      if (row.isdeleted) continue;
+
+      // Apply the same per-user deletion cutoff.
+      if (
+        deletedMessageId &&
+        row.messageid.toString() <= deletedMessageId
+      ) {
+        continue;
+      }
+
+      messages.push(row);
+      remaining--;
+
+      if (remaining === 0) break;
+    }
+  }
+
+  if (messages.length === 0) {
+    return res.status(200).json(
+      new apiResponse(200, [], "Newer messages fetched")
+    );
+  }
+
+  // 3. Get reactions
+  const messageIds = messages.map(
+    (msg) => msg.messageid
+  );
+
+  const reactionMap = await getMessageReactions(
+    convoId,
+    messageIds
+  );
+
+  // 4. Format response
+  const formattedMessages = messages.map((msg) => ({
+    messageId: msg.messageid.toString(),
+    convoId: msg.convoid.toString(),
+    senderId: msg.senderid.toString(),
+    content: msg.content,
+    bucket: msg.bucket,
+    messageType: msg.messagetype,
+    attachments: msg.attachments,
+    replyToMessageId: msg.replytomessageid,
+    isEdited: msg.isedited,
+    editedAt: msg.editedat,
+    isDeleted: msg.isdeleted,
+    deletedAt: msg.deletedat,
+    createdAt: msg.createdat,
+
+    reactions:
+      reactionMap.get(msg.messageid.toString()) || {},
+
+    systemType: msg.systemtype,
+
+    actorId: msg.actorid
+      ? msg.actorid.toString()
+      : null,
+
+    targetUserId: msg.targetuserid
+      ? msg.targetuserid.toString()
+      : null,
+  }));
+
+  return res.status(200).json(
+    new apiResponse(
+      200,
+      formattedMessages,
+      "Newer messages fetched"
+    )
+  );
+});
+
+export const getMessagesAround = asyncHandler(async (req, res) => {
+  const { convoId, messageId } = req.body;
+
+  const limit = Math.min(Number(req.query.limit) || 15, 50);
+  const before = Math.floor(limit / 2);
+  const after = limit - before - 1;
+
+  if (!convoId || !messageId) {
+    throw new apiError(400, "convoId and messageId are required");
+  }
+
+  /*
+   * Check whether this user deleted the conversation.
+   *
+   * If deletedAt exists, messages before that point are no longer
+   * part of this user's visible chat history.
+   */
+  const convoState = await prisma.conversationByUser.findUnique({
+    where: {
+      userId_convoId: {
+        userId: req.user!.id,
+        convoId,
+      },
+    },
+    select: {
+      deletedAt: true,
+    },
+  });
+
+  /*
+   * TIMEUUID -> timestamp
+   *
+   * We need the target message timestamp so we can determine
+   * whether it existed before the user's deletion point.
+   */
+  let targetDate: Date;
+
+  try {
+    targetDate = types.TimeUuid.fromString(messageId).getDate();
+  } catch {
+    throw new apiError(400, "Invalid messageId");
+  }
+
+  /*
+   * If the chat was deleted for this user and the target message
+   * existed before/on the deletion point, don't allow jumping to it.
+   */
+  if (
+    convoState?.deletedAt &&
+    targetDate.getTime() <= convoState.deletedAt.getTime()
+  ) {
+    throw new apiError(
+      404,
+      "Message not found"
+    );
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const targetBucket = Math.floor(
+    targetDate.getTime() / dayMs
+  );
+
+  const beforeQuery = `
+    SELECT convoID, bucket, messageID, senderID, content,
+           messageType, attachments, isEdited, editedAt,
+           isDeleted, deletedAt, replyToMessageID,
+           toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+      AND messageID < ?
+    LIMIT ?;
+  `;
+
+  const afterQuery = `
+    SELECT convoID, bucket, messageID, senderID, content,
+           messageType, attachments, isEdited, editedAt,
+           isDeleted, deletedAt, replyToMessageID,
+           toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+      AND messageID > ?
+    LIMIT ?;
+  `;
+
+  const targetQuery = `
+    SELECT convoID, bucket, messageID, senderID, content,
+           messageType, attachments, isEdited, editedAt,
+           isDeleted, deletedAt, replyToMessageID,
+           toTimestamp(messageID) AS createdAt,
+           systemType, actorID, targetUserID
+    FROM messages
+    WHERE convoID = ?
+      AND bucket = ?
+      AND messageID = ?
+    LIMIT 1;
+  `;
+
+  const [targetResult, beforeResult, afterResult] =
+    await Promise.all([
+      cassandra.execute(
+        targetQuery,
+        [convoId, targetBucket, messageId],
+        { prepare: true }
+      ),
+
+      cassandra.execute(
+        beforeQuery,
+        [convoId, targetBucket, messageId, before * 2],
+        { prepare: true }
+      ),
+
+      cassandra.execute(
+        afterQuery,
+        [convoId, targetBucket, messageId, after * 2],
+        { prepare: true }
+      ),
+    ]);
+
+  if (targetResult.rowLength === 0) {
+    throw new apiError(404, "Message not found");
+  }
+
+  const beforeMessages = beforeResult.rows
+    .filter((row) => !row.isdeleted)
+    .filter(
+      (row) =>
+        !convoState?.deletedAt ||
+        row.createdat > convoState.deletedAt
+    )
+    .slice(-before);
+
+  const targetMessage = targetResult.rows[0];
+
+  const afterMessages = afterResult.rows
+    .filter((row) => !row.isdeleted)
+    .filter(
+      (row) =>
+        !convoState?.deletedAt ||
+        row.createdat > convoState.deletedAt
+    )
+    .slice(0, after);
+
+  const messages = [
+    ...beforeMessages,
+    targetMessage,
+    ...afterMessages,
+  ];
+
+  messages.sort(
+    (a, b) =>
+      a.messageid.getDate().getTime() -
+      b.messageid.getDate().getTime()
+  );
+
+  const messageIds = messages.map(
+    (msg) => msg.messageid
+  );
+
+  const reactionMap = await getMessageReactions(
+    convoId,
+    messageIds
+  );
+
+  const formattedMessages = messages.map((msg) => ({
+    messageId: msg.messageid.toString(),
+    convoId: msg.convoid.toString(),
+    senderId: msg.senderid.toString(),
+    content: msg.content,
+    bucket: msg.bucket,
+    messageType: msg.messagetype,
+    attachments: msg.attachments,
+    replyToMessageId: msg.replytomessageid,
+    isEdited: msg.isedited,
+    editedAt: msg.editedat,
+    isDeleted: msg.isdeleted,
+    deletedAt: msg.deletedat,
+    createdAt: msg.createdat,
+    reactions:
+      reactionMap.get(msg.messageid.toString()) || {},
+    systemType: msg.systemtype,
+    actorId: msg.actorid
+      ? msg.actorid.toString()
+      : null,
+    targetUserId: msg.targetuserid
+      ? msg.targetuserid.toString()
+      : null,
+  }));
+
+  return res.status(200).json(
+    new apiResponse(
+      200,
+      {
+        messages: formattedMessages,
+        targetMessageId: messageId,
+        targetBucket,
+      },
+      "Messages around target message fetched"
+    )
+  );
+});
 
 export const groupUpdate = asyncHandler(async (req, res) => {
   const { convoId, groupName, description } = req.body;
@@ -1342,5 +1977,72 @@ export const groupLeaveByAdmin = asyncHandler(async (req, res) => {
   await redis.sRem(`convo:${convoId}:participants`, userId);
   return res.status(200).json(
     new apiResponse(200, { convoId }, "Left group successfully")
+  );
+});
+
+export const deleteChatForUser = asyncHandler(async (req, res) => {
+  const userId = req.user!.id;
+  const { convoId } = req.params;
+
+  if (!convoId) {
+    throw new apiError(400, "convoId is required");
+  }
+
+  const conversation = await prisma.conversationByUser.findUnique({
+    where: {
+      userId_convoId: {
+        userId, 
+        convoId,
+      },
+    },
+  });
+
+  if (!conversation) {
+    throw new apiError(404, "Conversation not found");
+  }
+
+  // Find the latest message currently visible to this user.
+  const latestMessage = await cassandra.execute(
+    `
+      SELECT messageID
+      FROM messages
+      WHERE convoID = ?
+      ORDER BY messageID DESC
+      LIMIT 1
+    `,
+    [convoId],
+    { prepare: true }
+  );
+
+  const deletedMessageId =
+    latestMessage.rowLength > 0
+      ? latestMessage.first().messageid.toString()
+      : null;
+
+  await prisma.conversationByUser.update({
+    where: {
+      userId_convoId: {
+        userId,
+        convoId,
+      },
+    },
+    data: {
+      deletedAt: new Date(),
+      deletedMessageId,
+      isActive: false,
+      unreadCount: 0,
+      lastMessage: null,
+      lastMessageSenderId: null,
+      lastMessageAt: null,
+      lastMessageId: null,
+    },
+  });
+
+  return res.status(200).json(
+    new apiResponse(
+      200,
+      { convoId },
+      "Chat deleted for this user"
+    )
   );
 });

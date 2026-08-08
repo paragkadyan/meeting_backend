@@ -133,6 +133,9 @@ model ConversationByUser {
   isActive Boolean @default(true)
   leftAt DateTime?
 
+  deletedAt DateTime?
+  deletedMessageId String?
+
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation Conversation @relation(fields: [convoId], references: [id], onDelete: Cascade)
 
