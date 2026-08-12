@@ -2006,29 +2006,17 @@ export const deleteChatForUser = asyncHandler(async (req, res) => {
         convoId,
       },
     },
+    select: {
+      lastMessageId: true,
+    },
   });
 
   if (!conversation) {
     throw new apiError(404, "Conversation not found");
   }
 
-  // Find the latest message currently visible to this user.
-  const latestMessage = await cassandra.execute(
-    `
-      SELECT messageID
-      FROM messages
-      WHERE convoID = ?
-      ORDER BY messageID DESC
-      LIMIT 1
-    `,
-    [convoId],
-    { prepare: true }
-  );
-
-  const deletedMessageId =
-    latestMessage.rowLength > 0
-      ? latestMessage.first().messageid.toString()
-      : null;
+  // Last message visible to this user before deleting the chat.
+  const deletedMessageId = conversation.lastMessageId;
 
   await prisma.conversationByUser.update({
     where: {
@@ -2040,8 +2028,10 @@ export const deleteChatForUser = asyncHandler(async (req, res) => {
     data: {
       deletedAt: new Date(),
       deletedMessageId,
+
       isActive: false,
       unreadCount: 0,
+
       lastMessage: null,
       lastMessageSenderId: null,
       lastMessageAt: null,
@@ -2052,7 +2042,10 @@ export const deleteChatForUser = asyncHandler(async (req, res) => {
   return res.status(200).json(
     new apiResponse(
       200,
-      { convoId },
+      {
+        convoId,
+        deletedMessageId,
+      },
       "Chat deleted for this user"
     )
   );
