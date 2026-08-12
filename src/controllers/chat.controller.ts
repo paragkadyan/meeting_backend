@@ -222,9 +222,19 @@ export const createDirectChat = asyncHandler(async (req, res) => {
 export const createGroupChat = asyncHandler(async (req, res) => {
   const {
     groupName,
-    participants,
     description,
   } = req.body;
+
+  // Parse participants if it's a JSON string (from FormData)
+  let participants = req.body.participants;
+  if (typeof participants === 'string') {
+    try {
+      participants = JSON.parse(participants);
+    } catch (error) {
+      throw new apiError(400, "Invalid participants format");
+    }
+  }
+
   const avatarFile = req.file;
 
   const creatorID = req.user!.id;
@@ -493,7 +503,7 @@ export const getConversations = asyncHandler(async (req, res) => {
 
 
 const markmessagesAsRead = async (convoId: string, userId: string, messageIds: string[]) => {
- try {
+  try {
     const queries = messageIds.map((messageId) => ({
       query: `
         INSERT INTO message_reads (convoID, messageID, userID, readAt)
@@ -512,9 +522,9 @@ const markmessagesAsRead = async (convoId: string, userId: string, messageIds: s
       },
       data: { unreadCount: 0 },
     });
- } catch (error) {
-   throw new apiError(500, "Failed to mark messages as read");
- }
+  } catch (error) {
+    throw new apiError(500, "Failed to mark messages as read");
+  }
 }
 
 const getMessageReactions = async (
@@ -1336,7 +1346,7 @@ export const groupUpdate = asyncHandler(async (req, res) => {
   }
   const userId = req.user!.id;
 
- const participant = await prisma.conversationParticipant.findUnique({
+  const participant = await prisma.conversationParticipant.findUnique({
     where: {
       convoId_userId: {
         convoId,
@@ -1379,7 +1389,7 @@ export const groupUpdate = asyncHandler(async (req, res) => {
   }
 
   return res.status(200).json(
-    new apiResponse(200, { 
+    new apiResponse(200, {
       convoId,
       name: updatedConvo.name,
       avatarURL: updatedConvo.avatarURL,
@@ -1473,7 +1483,7 @@ export const groupLeaveByUser = asyncHandler(async (req, res) => {
     }
   });
 
-  if(participant?.role === "admin") {
+  if (participant?.role === "admin") {
     throw new apiError(403, "Group admins cannot leave the group. Please assign another admin before leaving.");
   }
 
@@ -1520,8 +1530,8 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
   if (!convo || convo.type !== "group") {
     throw new apiError(404, "Group conversation not found");
   }
-  
- const participant = await prisma.conversationParticipant.findUnique({
+
+  const participant = await prisma.conversationParticipant.findUnique({
     where: {
       convoId_userId: {
         convoId,
@@ -1556,9 +1566,9 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
 
   blockRelations.forEach((b) => {
     if (b.blockerId === req.user!.id) {
-      blockedSet.add(b.blockedId); 
+      blockedSet.add(b.blockedId);
     } else {
-      blockedSet.add(b.blockerId); 
+      blockedSet.add(b.blockerId);
     }
   });
 
@@ -1580,7 +1590,7 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     select: { userId: true },
   });
 
-   const convoUserMap = new Map(
+  const convoUserMap = new Map(
     convoUsers.map(u => [u.userId, u])
   );
 
@@ -1789,7 +1799,7 @@ export const assignAdminRole = asyncHandler(async (req, res) => {
       },
     },
   });
-  if (!participant || participant.role !== "admin") {  
+  if (!participant || participant.role !== "admin") {
     throw new apiError(403, "Only group admins can assign admin role");
   }
   const userToPromote = await prisma.conversationParticipant.findUnique({
@@ -1937,7 +1947,7 @@ export const groupLeaveByAdmin = asyncHandler(async (req, res) => {
   if (!participant) {
     throw new apiError(404, "Participant not found");
   }
-    if (participant.role !== "admin") {
+  if (participant.role !== "admin") {
     throw new apiError(403, "You are not group admin");
   }
   const otherParticipants = await prisma.conversationParticipant.findMany({
@@ -1962,8 +1972,9 @@ export const groupLeaveByAdmin = asyncHandler(async (req, res) => {
   await prisma.$transaction([
     prisma.conversationParticipant.delete({
       where: {
-          convoId_userId: { convoId, userId }
-      }    }),
+        convoId_userId: { convoId, userId }
+      }
+    }),
     prisma.conversationByUser.update({
       where: {
         userId_convoId: { userId, convoId }
@@ -1991,7 +2002,7 @@ export const deleteChatForUser = asyncHandler(async (req, res) => {
   const conversation = await prisma.conversationByUser.findUnique({
     where: {
       userId_convoId: {
-        userId, 
+        userId,
         convoId,
       },
     },

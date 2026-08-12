@@ -388,7 +388,7 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
   try {
     const { getIO } = await import('../socket/index');
     const io = getIO();
-    
+
     // Get all conversations this user is part of
     const userConversations = await prisma.conversationParticipant.findMany({
       where: { userId: userId! },
@@ -415,7 +415,7 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     console.error('Failed to emit profileUpdated event:', error);
   }
 
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Profile edited successfully.');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profileURL: user.profileURL, profilePhoto: user.profileURL, mobileNumber: user.mobileNumber, phNumber: user.mobileNumber, dob: user.dob, location: user.location, authProvider: user.authProvider } }, 'Profile edited successfully.');
   return res.status(200).json(response);
 });
 

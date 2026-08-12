@@ -58,8 +58,7 @@ async function uploadManagedImage(params: {
   }
 
   const extension = extensionForMimeType(file.mimetype, file.originalname);
-  const objectKey = `${prefix}/${id}.${extension}`;
-
+  const objectKey = `${prefix}/${id}/${Date.now()}.${extension}`;
   await minioClient.putObject(bucketName, objectKey, file.buffer, file.size, {
     "Content-Type": file.mimetype,
   });

@@ -158,7 +158,7 @@ model MediaFile {
   mimeType  String   @map("mime_type")
   size      BigInt
   chatId    String   @map("chat_id") @db.Uuid
-  senderId  String   @map("sender_id") @db.Uuid
+  senderId  String   @map("sender_id")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([chatId], map: "idx_media_files_chat_id")
