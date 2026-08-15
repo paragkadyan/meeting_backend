@@ -101,7 +101,7 @@ router.route('/push-subscriptions/:subscriptionId').delete(
     authMiddleware, deletePushSubscription
 );
 
-router.route('/delete-chat').delete(
+router.route('/delete-chat/:convoId').delete(
     authMiddleware, deleteChatForUser
 );
 
