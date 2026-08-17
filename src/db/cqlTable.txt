@@ -18,6 +18,9 @@ CREATE TABLE messages (
   isDeleted BOOLEAN,
   deletedAt TIMESTAMP,
   replyToMessageID TIMEUUID,
+  replyToMessageContent TEXT,
+  replyToMessageType TEXT,
+  replyToMessageSenderID TIMEUUID,
 
   PRIMARY KEY ((convoID, bucket), messageID)
 )

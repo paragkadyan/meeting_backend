@@ -632,7 +632,7 @@ export const getMessages = asyncHandler(async (req, res) => {
     ) {
       const query = `
         SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-               isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,
+               isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID,
                toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
         FROM messages
         WHERE convoID = ?
@@ -654,7 +654,7 @@ export const getMessages = asyncHandler(async (req, res) => {
     } else {
       const query = `
         SELECT convoID, bucket, messageID, senderID, content, messageType, attachments,
-               isEdited, editedAt, isDeleted, deletedAt, replyToMessageID,
+               isEdited, editedAt, isDeleted, deletedAt, replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID,
                toTimestamp(messageID) AS createdat, systemType, actorID, targetUserID
         FROM messages
         WHERE convoID = ?
@@ -698,6 +698,9 @@ export const getMessages = asyncHandler(async (req, res) => {
     messageType: msg.messagetype,
     attachments: msg.attachments,
     replyToMessageId: msg.replytomessageid,
+    replyToMessageContent: msg.replytomessagecontent,
+    replyToMessageType: msg.replytomessagetype,
+    replyToMessageSenderId: msg.replytomessagesenderid,
     isEdited: msg.isedited,
     editedAt: msg.editedat,
     isDeleted: msg.isdeleted,
@@ -808,7 +811,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
   const sameBucketQuery = `
     SELECT convoID, bucket, messageID, senderID, content, messageType,
            attachments, isEdited, editedAt, isDeleted, deletedAt,
-           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID, toTimestamp(messageID) AS createdAt,
            systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
@@ -820,7 +823,7 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
   const olderBucketQuery = `
     SELECT convoID, bucket, messageID, senderID, content, messageType,
            attachments, isEdited, editedAt, isDeleted, deletedAt,
-           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           replyToMessageID,  replyToMessageContent, replyToMessageType, replyToMessageSenderID, toTimestamp(messageID) AS createdAt,
            systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?
@@ -916,6 +919,9 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
     messageType: msg.messagetype,
     attachments: msg.attachments,
     replyToMessageId: msg.replytomessageid,
+    replyToMessageContent: msg.replytomessagecontent,
+    replyToMessageType: msg.replytomessagetype,
+    replyToMessageSenderId: msg.replytomessagesenderid,
     isEdited: msg.isedited,
     editedAt: msg.editedat,
     isDeleted: msg.isdeleted,
@@ -981,7 +987,7 @@ export const getNewerMessages = asyncHandler(async (req, res) => {
   const sameBucketQuery = `
     SELECT convoID, bucket, messageID, senderID, content, messageType,
            attachments, isEdited, editedAt, isDeleted, deletedAt,
-           replyToMessageID, toTimestamp(messageID) AS createdAt,
+           replyToMessageID, reply toTimestamp(messageID) AS createdAt,
            systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?

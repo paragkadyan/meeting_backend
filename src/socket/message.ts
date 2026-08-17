@@ -9,7 +9,7 @@ import { logger } from '../logger/logger';
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
 
-  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, systemType = null, actorId = null, targetUserId = null }) => {
+  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, replyToMessageContent = null, replyToMessageType = null, replyToMessageSenderID = null, systemType = null, actorId = null, targetUserId = null }) => {
     try {
       const normalizedContent = typeof content === 'string' ? content : '';
       const normalizedAttachments = Array.isArray(attachments)
@@ -62,10 +62,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
       await cassandra.execute(
         `INSERT INTO messages (
-          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID, systemType, actorID, targetUserID
+          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID, systemType, actorID, targetUserID
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [convoId, bucket, messageId, userId, normalizedContent, messageType, normalizedAttachments, replyToMessageID, systemType, actorId, targetUserId],
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [convoId, bucket, messageId, userId, normalizedContent, messageType, normalizedAttachments, replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID, systemType, actorId, targetUserId],
         { prepare: true }
       );
 
@@ -80,6 +80,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           lastMessageSenderId: userId,
           lastMessageAt: new Date(),
           lastMessageId: messageId.toString(),
+          isActive: true
         },
       });
 
@@ -99,6 +100,9 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         messageType,
         attachments: normalizedAttachments,
         replyToMessageID,
+        replyToMessageContent,
+        replyToMessageType,
+        replyToMessageSenderID,
         systemType,
         actorId,
         targetUserId,
