@@ -41,7 +41,7 @@ router.route('/get-newer-messages').post(
     authMiddleware, getNewerMessages
 );
 
-router.route('get-messages-around').post(
+router.route('/get-messages-around').post(
     authMiddleware, getMessagesAround
 );
 
