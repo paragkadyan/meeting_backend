@@ -1,3 +1,5 @@
+import { apiError } from "../../utils/apiError";
+
 export type MediaType = "images" | "audio" | "video" | "docs";
 
 const ALLOWED_MIME_PREFIXES = ["image/", "audio/", "video/"];
@@ -18,13 +20,30 @@ const DEFAULT_UPLOAD_LIMITS: Record<MediaType, number> = {
   docs: Number(process.env.MEDIA_DOC_MAX_UPLOAD_BYTES || 25 * 1024 * 1024),
 };
 
+const MEDIA_TYPE_LABELS: Record<MediaType, string> = {
+  images: "Image",
+  audio: "Audio",
+  video: "Video",
+  docs: "Document",
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(0)}KB`;
+  }
+  return `${bytes} bytes`;
+}
+
 export function resolveMediaFolder(mimeType: string): MediaType {
   if (mimeType.startsWith("image/")) return "images";
   if (mimeType.startsWith("audio/")) return "audio";
   if (mimeType.startsWith("video/")) return "video";
   if (ALLOWED_DOC_MIME_TYPES.has(mimeType)) return "docs";
 
-  throw new Error("Unsupported file MIME type");
+  throw new apiError(400, "Unsupported file type");
 }
 
 export function validateMimeType(mimeType: string): boolean {
@@ -43,6 +62,10 @@ export function validateUploadSize(mimeType: string, size: number): void {
   const mediaType = resolveMediaFolder(mimeType);
   const maxSize = DEFAULT_UPLOAD_LIMITS[mediaType];
   if (size > maxSize) {
-    throw new Error(`${mediaType} upload exceeds max allowed size of ${maxSize} bytes`);
+    const fileType = MEDIA_TYPE_LABELS[mediaType];
+    throw new apiError(
+      400,
+      `${fileType} file size (${formatBytes(size)}) exceeds maximum allowed size of ${formatBytes(maxSize)}`
+    );
   }
 }
