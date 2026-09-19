@@ -63,3 +63,25 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
         throw new apiError(401, "Invalid or expired refresh token");
     }
 }
+
+/**
+ * Returns the remaining lifetime encoded in a JWT.  Cookie and Redis expiry
+ * must follow the signed token expiry rather than a separate hard-coded
+ * duration, otherwise a valid-looking cookie/session can become unusable
+ * earlier than expected.
+ */
+export function getTokenMaxAge(token: string): number {
+    const decoded = jwt.decode(token);
+    const exp = typeof decoded === "object" && decoded ? decoded.exp : undefined;
+
+    if (typeof exp !== "number") {
+        throw new apiError(500, "Token expiration is missing");
+    }
+
+    const maxAge = exp * 1000 - Date.now();
+    if (maxAge <= 0) {
+        throw new apiError(500, "Token expiration is invalid");
+    }
+
+    return maxAge;
+}

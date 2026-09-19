@@ -587,6 +587,7 @@ export const getMessages = asyncHandler(async (req, res) => {
     },
     select: {
       deletedMessageId: true,
+      lastMessageId: true,
     },
   });
 
@@ -594,9 +595,27 @@ export const getMessages = asyncHandler(async (req, res) => {
 
   const dayMs = 24 * 60 * 60 * 1000;
   const nowBucket = Math.floor(Date.now() / dayMs);
+  let startBucket = nowBucket;
+
+  // Conversation metadata is updated whenever a message is inserted.  Its
+  // TIMEUUID identifies the latest Cassandra partition without requiring the
+  // client to provide a bucket.  Legacy/invalid metadata keeps the historical
+  // current-bucket fallback intact.
+  if (convoState?.lastMessageId) {
+    try {
+      startBucket = Math.floor(
+        types.TimeUuid.fromString(convoState.lastMessageId).getDate().getTime() / dayMs
+      );
+    } catch {
+      startBucket = nowBucket;
+    }
+  }
 
   const msgs: any[] = [];
-  const lookbackDays = Math.max(1, Number(req.query.lookbackDays) || 30);
+  const lookbackDays = Math.min(
+    Math.max(1, Number(req.query.lookbackDays) || 30),
+    365
+  );
 
   let deletedMessageBucket: number | null = null;
 
@@ -607,7 +626,7 @@ export const getMessages = asyncHandler(async (req, res) => {
   }
 
   for (let i = 0; i < lookbackDays && msgs.length < limit; i++) {
-    const bucket = nowBucket - i;
+    const bucket = startBucket - i;
 
     if (bucket < 0) break;
 
@@ -987,7 +1006,7 @@ export const getNewerMessages = asyncHandler(async (req, res) => {
   const sameBucketQuery = `
     SELECT convoID, bucket, messageID, senderID, content, messageType,
            attachments, isEdited, editedAt, isDeleted, deletedAt,
-           replyToMessageID, reply toTimestamp(messageID) AS createdAt,
+           replyToMessageID, toTimestamp(messageID) AS createdAt,
            systemType, actorID, targetUserID
     FROM messages
     WHERE convoID = ?

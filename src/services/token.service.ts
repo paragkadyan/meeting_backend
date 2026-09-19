@@ -1,13 +1,41 @@
 import { redis } from '../db/redis';
 import { apiError } from '../utils/apiError';
+import { getTokenMaxAge } from '../utils/jwt';
 
-const REFRESH_TTL = 7 * 24 * 60 * 60;
-
-export async function registerRefreshToken(userId: string, jti: string) {
+export async function registerRefreshToken(userId: string, jti: string, refreshToken: string) {
     try {
-        await redis.set(`refresh:${userId}:${jti}`, "active", { EX: REFRESH_TTL });
+        const refreshTtl = Math.max(1, Math.ceil(getTokenMaxAge(refreshToken) / 1000));
+        await redis.set(`refresh:${userId}:${jti}`, "active", { EX: refreshTtl });
     } catch (error) {
       throw new apiError(500, 'Error registering refresh token');
+    }
+}
+
+/**
+ * Consume the old refresh JTI and activate the replacement as one Redis
+ * operation.  This prevents two concurrent requests from both treating the
+ * same refresh token as active during rotation.
+ */
+export async function rotateRefreshToken(
+    userId: string,
+    oldJti: string,
+    newJti: string,
+    newRefreshToken: string
+) {
+    try {
+        const refreshTtl = Math.max(1, Math.ceil(getTokenMaxAge(newRefreshToken) / 1000));
+        const oldKey = `refresh:${userId}:${oldJti}`;
+        const newKey = `refresh:${userId}:${newJti}`;
+        const result = await redis.eval(
+            `if redis.call('GET', KEYS[1]) ~= 'active' then return 0 end
+             redis.call('DEL', KEYS[1])
+             redis.call('SET', KEYS[2], 'active', 'EX', ARGV[1])
+             return 1`,
+            { keys: [oldKey, newKey], arguments: [String(refreshTtl)] }
+        );
+        return result === 1;
+    } catch (error) {
+        throw new apiError(500, 'Error rotating refresh token');
     }
 }
 
