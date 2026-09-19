@@ -7,7 +7,7 @@ import { prisma } from '../db/post';
 import bcrypt from 'bcryptjs';
 import { COOKIE_SECURE } from "../config/env";
 import { registerRefreshToken } from "../services/token.service";
-import { signAccessToken, signRefreshToken } from "../utils/jwt";
+import { getTokenMaxAge, signAccessToken, signRefreshToken } from "../utils/jwt";
 import { v4 as uuidv4 } from 'uuid';
 import { sendTemplatedEmail } from "../services/email.service";
 
@@ -116,13 +116,13 @@ export const adminLogin = asyncHandler(async (req, res) => {
     const accessToken = signAccessToken({ userId: admin.id });
     const jti = uuidv4();
     const refreshToken = signRefreshToken({ userId: admin.id, jti });
-    await registerRefreshToken(admin.id, jti);
+    await registerRefreshToken(admin.id, jti, refreshToken);
 
     res.cookie('accessToken', accessToken, {
         httpOnly: true,
         secure: COOKIE_SECURE,
         sameSite: 'none',
-        maxAge: 15 * 60 * 1000, // 15 min
+        maxAge: getTokenMaxAge(accessToken),
         // domain: COOKIE_DOMAIN,
         path: '/',
     });
@@ -131,7 +131,7 @@ export const adminLogin = asyncHandler(async (req, res) => {
         httpOnly: true,
         secure: COOKIE_SECURE,
         sameSite: 'none',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: getTokenMaxAge(refreshToken),
         // domain: COOKIE_DOMAIN,
         path: '/',
     });

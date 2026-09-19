@@ -9,7 +9,7 @@ import {
 } from "../config/env";
 
 export const cassandra = new Client({
-  contactPoints: [CASSANDRA_HOST || "localhost"],
+  contactPoints: (CASSANDRA_HOST || "localhost").split(",").map((host) => host.trim()).filter(Boolean),
   localDataCenter: CASSANDRA_DATACENTER || "datacenter1",
   keyspace: CASSANDRA_KEYSPACE,
   protocolOptions: {
@@ -25,8 +25,14 @@ export const cassandra = new Client({
 export const connectCassandra = async () => {
   try {
     await cassandra.connect();
-    console.log("Cassandra Connected");
+    console.log("Cassandra Connected", {
+      contactPoints: (CASSANDRA_HOST || "localhost").split(",").map((host) => host.trim()).filter(Boolean),
+      port: Number(CASSANDRA_PORT) || 9042,
+      keyspace: CASSANDRA_KEYSPACE || null,
+      localDataCenter: CASSANDRA_DATACENTER || "datacenter1",
+    });
   } catch (err) {
     console.error("Cassandra Error:", err);
+    throw err;
   }
 };

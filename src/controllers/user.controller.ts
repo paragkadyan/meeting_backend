@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
-import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise, isRefreshTokenActive } from '../services/token.service';
+import { signAccessToken, signRefreshToken, verifyRefreshToken, getTokenMaxAge } from '../utils/jwt';
+import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise, rotateRefreshToken } from '../services/token.service';
 import { COOKIE_DOMAIN, COOKIE_SECURE, FRONTEND_ORIGIN } from '../config/env';
 import { prisma } from '../db/post';
 import { asyncHandler } from "../utils/asyncHandler";
@@ -119,13 +119,13 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
   });
 
 
-  await registerRefreshToken(newUser.id, jti);
+  await registerRefreshToken(newUser.id, jti, refreshToken);
 
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: 'none',
-    maxAge: 15 * 60 * 1000,
+    maxAge: getTokenMaxAge(accessToken),
     // domain: COOKIE_DOMAIN,
     path: '/',
   });
@@ -135,7 +135,7 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: 'none',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: getTokenMaxAge(refreshToken),
     // domain: COOKIE_DOMAIN,
     path: '/',
   });
@@ -163,14 +163,14 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   const accessToken = signAccessToken({ userId: user.id });
   const jti = uuidv4();
   const refreshToken = signRefreshToken({ userId: user.id, jti });
-  await registerRefreshToken(user.id, jti);
+  await registerRefreshToken(user.id, jti, refreshToken);
 
 
   res.cookie('accessToken', accessToken, {
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: 'none',
-    maxAge: 15 * 60 * 1000, // 15 min
+    maxAge: getTokenMaxAge(accessToken),
     // domain: COOKIE_DOMAIN,
     path: '/',
   });
@@ -180,7 +180,7 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: 'none',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: getTokenMaxAge(refreshToken),
     // domain: COOKIE_DOMAIN,
     path: '/',
   });
@@ -486,18 +486,21 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
   const accessToken = signAccessToken({ userId: user.id });
   const refreshToken = signRefreshToken({ userId: user.id, jti });
 
+  await registerRefreshToken(user.id, jti, refreshToken);
+
   res.cookie("accessToken", accessToken, {
     httpOnly: true,
-    secure: true,
+    secure: COOKIE_SECURE,
     sameSite: "none",
-    maxAge: 15 * 60 * 1000,
+    maxAge: getTokenMaxAge(accessToken),
+    path: "/",
   });
 
   res.cookie("refreshToken", refreshToken, {
     httpOnly: true,
-    secure: true,
+    secure: COOKIE_SECURE,
     sameSite: "none",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: getTokenMaxAge(refreshToken),
     path: "/",
   });
   const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken }, 'Login with Google successful.');
@@ -690,52 +693,40 @@ export const refreshAccessToken = asyncHandler(
       throw new apiError(401, 'Refresh token missing');
     }
 
+    let payload;
     try {
-      const payload = verifyRefreshToken(oldRefreshToken);
-
-      if (!payload?.userId || !payload?.jti) {
-        throw new apiError(401, 'Invalid refresh token payload');
-      }
-
-      // 1. CRITICAL FIX: Validate that this specific refresh token is still active
-      const active = await isRefreshTokenActive(payload.userId, payload.jti);
-
-      if (!active) {
-        // Token has been used already or revoked. Clear cookies and throw.
-        res.clearCookie('accessToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
-        res.clearCookie('refreshToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
-        throw new apiError(401, 'Session compromised or expired');
-      }
-
-      // 2. Safe to rotate now
-      await revokeRefreshToken(payload.userId, payload.jti);
-
-      const newJti = uuidv4();
-      const newAccessToken = signAccessToken({ userId: payload.userId });
-      const newRefreshToken = signRefreshToken({ userId: payload.userId, jti: newJti });
-
-      await registerRefreshToken(payload.userId, newJti);
-
-      // 3. Set cookies with structured configurations
-      const cookieOptions = {
-        httpOnly: true,
-        secure: COOKIE_SECURE,
-        sameSite: 'none' as const,
-        path: '/',
-      };
-
-      res.cookie('accessToken', newAccessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
-      res.cookie('refreshToken', newRefreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
-
-      return res.status(200).json(
-        new apiResponse(200, { accessToken: newAccessToken }, 'Token refreshed successfully')
-      );
+      payload = verifyRefreshToken(oldRefreshToken);
     } catch (error) {
-      // 4. CRITICAL FIX: Ensure clearCookie flags exactly match your setting flags
+      // An actually expired or malformed JWT cannot recover. Preserve the
+      // existing cookie-clearing behavior for this case only; a concurrent
+      // rotation must not erase the replacement cookies set by another request.
       res.clearCookie('accessToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
       res.clearCookie('refreshToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
-
       throw new apiError(401, 'Refresh token expired or invalid');
     }
+
+    if (!payload?.userId || !payload?.jti) {
+      throw new apiError(401, 'Invalid refresh token payload');
+    }
+
+    const newJti = uuidv4();
+    const newAccessToken = signAccessToken({ userId: payload.userId });
+    const newRefreshToken = signRefreshToken({ userId: payload.userId, jti: newJti });
+    const rotated = await rotateRefreshToken(payload.userId, payload.jti, newJti, newRefreshToken);
+    if (!rotated) throw new apiError(401, 'Session compromised or expired');
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: COOKIE_SECURE,
+      sameSite: 'none' as const,
+      path: '/',
+    };
+
+    res.cookie('accessToken', newAccessToken, { ...cookieOptions, maxAge: getTokenMaxAge(newAccessToken) });
+    res.cookie('refreshToken', newRefreshToken, { ...cookieOptions, maxAge: getTokenMaxAge(newRefreshToken) });
+
+    return res.status(200).json(
+      new apiResponse(200, { accessToken: newAccessToken }, 'Token refreshed successfully')
+    );
   }
 );

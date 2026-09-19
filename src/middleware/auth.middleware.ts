@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken, verifyRefreshToken, signAccessToken, signRefreshToken } from '../utils/jwt';
-import { isRefreshTokenActive, revokeRefreshToken, registerRefreshToken, revokeAllOnCompromise } from '../services/token.service';
+import { verifyAccessToken, verifyRefreshToken, signAccessToken, signRefreshToken, getTokenMaxAge } from '../utils/jwt';
+import { rotateRefreshToken } from '../services/token.service';
 import { COOKIE_SECURE, COOKIE_DOMAIN } from '../config/env';
 import { v4 as uuidv4 } from 'uuid';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -28,36 +28,17 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
 
   try {
     const payload = verifyRefreshToken(refresh);
-    const active = await isRefreshTokenActive(payload.userId, payload.jti);
-    if (!active) {
-      res.clearCookie("accessToken", {
-        httpOnly: true,
-        secure: COOKIE_SECURE,
-        sameSite: "none",
-        // domain: COOKIE_DOMAIN,
-        path: "/",
-      });
-      res.clearCookie("refreshToken", {
-        httpOnly: true,
-        secure: COOKIE_SECURE,
-        sameSite: "none",
-        // domain: COOKIE_DOMAIN,
-        path: "/",
-      });
-      throw new apiError(401, "refresh revoked");
-    }
-
-    await revokeRefreshToken(payload.userId, payload.jti);
     const newJti = uuidv4();
     const newRefresh = signRefreshToken({ userId: payload.userId, jti: newJti });
-    await registerRefreshToken(payload.userId, newJti);
     const newAccess = signAccessToken({ userId: payload.userId });
+    const rotated = await rotateRefreshToken(payload.userId, payload.jti, newJti, newRefresh);
+    if (!rotated) throw new apiError(401, "refresh revoked");
 
     res.cookie("accessToken", newAccess, {
       httpOnly: true,
       secure: COOKIE_SECURE,
       sameSite: "none",
-      maxAge: 15 * 60 * 1000,
+      maxAge: getTokenMaxAge(newAccess),
       // domain: COOKIE_DOMAIN,
       path: "/",
     });
@@ -65,7 +46,7 @@ export const authMiddleware = asyncHandler(async (req: Request, res: Response, n
       httpOnly: true,
       secure: COOKIE_SECURE,
       sameSite: "none",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: getTokenMaxAge(newRefresh),
       // domain: COOKIE_DOMAIN,
       path: "/",
     });

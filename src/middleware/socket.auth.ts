@@ -1,5 +1,6 @@
 import { verifyAccessToken, verifyRefreshToken } from "../utils/jwt";
 import { Socket } from "socket.io";
+import { isRefreshTokenActive } from "../services/token.service";
 
 export const socketAuth = async (socket: Socket, next: (err?: Error) => void) => {
   try {
@@ -34,6 +35,8 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void) =>
     if (refreshToken) {
       try {
         const decoded = verifyRefreshToken(refreshToken);
+        const active = await isRefreshTokenActive(decoded.userId, decoded.jti);
+        if (!active) return next(new Error("Invalid or expired tokens"));
         socket.data.user = { id: decoded.userId };
         return next();
       } catch (error) {
