@@ -12,6 +12,7 @@ const fakePrisma = {};
 const emitted = [];
 const closedRooms = [];
 const postedMessages = [];
+const callPushes = [];
 function setFakePrisma(next) {
   for (const key of Object.keys(fakePrisma)) delete fakePrisma[key];
   Object.assign(fakePrisma, next);
@@ -26,6 +27,9 @@ Module._load = function (request, parent, isMain) {
           to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }),
         }),
       };
+    }
+    if (request === "./pushNotification.service") {
+      return { pushNotificationService: { sendIncomingCallNotification: async (userId, call) => { callPushes.push({ userId, call }); } } };
     }
     if (request === "./message.service") {
       return { createAndDeliverMessage: async (_io, message, options) => { postedMessages.push({ message, options }); return message; } };
@@ -83,6 +87,8 @@ test("conversation member can start a call and notifications omit the room name"
   assert.equal(call.participants.find((participant) => participant.userId === "user-1").status, "ACCEPTED");
   assert.equal(emitted.some(({ event }) => event === "callIncoming"), true);
   assert.equal(emitted.every(({ payload }) => !("roomName" in payload)), true);
+  // The person rung also gets a push (for a phone with the app in the background); the caller doesn't.
+  assert.deepEqual(callPushes.map(({ userId }) => userId), ["user-2"]);
 });
 
 test("conversation non-member cannot create a call", async () => {

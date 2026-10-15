@@ -20,6 +20,8 @@ type ExpoMessage = {
   sound?: 'default';
   channelId?: string;
   priority?: 'default' | 'normal' | 'high';
+  /** Seconds Expo/FCM/APNs keep trying to deliver; after that the notification is dropped. */
+  ttl?: number;
 };
 
 type ExpoTicket =

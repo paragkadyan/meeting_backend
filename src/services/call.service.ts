@@ -6,6 +6,7 @@ import { apiError } from "../utils/apiError";
 import { logger } from "../logger/logger";
 import { closeLiveKitRoomIfPresent, createParticipantToken, getRoomOccupancy } from "./livekit.service";
 import { createAndDeliverMessage } from "./message.service";
+import { pushNotificationService } from "./pushNotification.service";
 
 /**
  * Call lifecycle
@@ -280,6 +281,12 @@ export async function startCall(convoId: string, userId: string, type: CallType 
 
   emitToUsers(ringingIds, "callIncoming", { ...summary, initiatedBy: userId });
   emitToUsers([userId], "callRinging", summary);
+  // Phones with the app in the background have no socket; ring them by push.
+  for (const inviteeId of ringingIds) {
+    pushNotificationService
+      .sendIncomingCallNotification(inviteeId, { callId: call.id, convoId, type: call.type })
+      .catch((error) => logger.warn("Incoming call push failed", { callId: call.id, error: error instanceof Error ? error.message : String(error) }));
+  }
   return { ...call, isGroup, existing: false };
 }
 

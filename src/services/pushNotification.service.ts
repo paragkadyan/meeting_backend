@@ -44,6 +44,33 @@ class PushNotificationService {
     await Promise.allSettled([this.sendMobile(userId, context), this.sendWeb(userId)]);
   }
 
+  /**
+   * Rings the mobile app when it's in the background (no socket). Phones only:
+   * the web gets the socket event. Content-free like message pushes; the app
+   * shows the in-app ringing screen on open (or silences this while in front).
+   */
+  async sendIncomingCallNotification(
+    userId: string,
+    call: { callId: string; convoId: string; type: 'AUDIO' | 'VIDEO' }
+  ): Promise<void> {
+    const tokens = await prisma.mobilePushToken.findMany({ where: { userId }, select: { token: true } });
+    if (tokens.length === 0) return;
+
+    await sendExpoPush(
+      tokens.map(({ token }) => ({
+        to: token,
+        title: call.type === 'VIDEO' ? 'Incoming video call' : 'Incoming voice call',
+        body: 'Open Heyllow to answer',
+        data: { type: 'call', callId: call.callId, convoId: call.convoId },
+        sound: 'default' as const,
+        channelId: MOBILE_CHANNEL_ID,
+        priority: 'high' as const,
+        // A call rings for 60s; a late notification would be for a call that's over.
+        ttl: 60,
+      }))
+    );
+  }
+
   /** Same generic, content-free wording as web push; tapping opens the chat. */
   private async sendMobile(userId: string, context: { convoId?: string }): Promise<void> {
     const tokens = await prisma.mobilePushToken.findMany({ where: { userId }, select: { token: true } });

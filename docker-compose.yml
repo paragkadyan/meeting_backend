@@ -38,7 +38,7 @@ services:
     # backend always share the same LIVEKIT_API_KEY / LIVEKIT_API_SECRET.
     # node_ip is the address browsers send audio/video to (Docker's internal IP
     # is unreachable from the host). For phones on your Wi-Fi, set
-    # LIVEKIT_NODE_IP to the PC's LAN IP and drop the 127.0.0.1 port bindings.
+    # LIVEKIT_NODE_IP to the PC's LAN IP and LIVEKIT_BIND_IP=0.0.0.0.
     environment:
       LIVEKIT_CONFIG: |
         port: 7880
@@ -56,9 +56,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:7880:7880"
-      - "127.0.0.1:7881:7881"
-      - "127.0.0.1:7882:7882/udp"
+      - "${LIVEKIT_BIND_IP:-127.0.0.1}:7880:7880"
+      - "${LIVEKIT_BIND_IP:-127.0.0.1}:7881:7881"
+      - "${LIVEKIT_BIND_IP:-127.0.0.1}:7882:7882/udp"
 
   redis-gui:
     image: rediscommander/redis-commander:latest
