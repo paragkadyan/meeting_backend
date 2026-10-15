@@ -1,0 +1,31 @@
+# Copy to /etc/livekit/livekit.yaml on the server and replace the REPLACE_ values.
+# Never commit the filled-in file: it holds the secret.
+
+# Signalling (WebSocket + API). Reached only through nginx, so keep it closed in the firewall.
+port: 7880
+
+rtc:
+  # Call media. Open these in the firewall: 7881/tcp and 50000-60000/udp.
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  # Advertise the server's public IP to phones and browsers.
+  use_external_ip: true
+
+# Your own key and secret: any name, and a random secret of 32+ characters
+# (generate one with: openssl rand -hex 32). Use the same pair in the backend's .env.
+keys:
+  REPLACE_KEY: REPLACE_SECRET
+
+# Tells the backend when people join or leave. The backend runs on this same server.
+webhook:
+  api_key: REPLACE_KEY
+  urls:
+    - http://127.0.0.1:3000/api/calls/livekit/webhook
+
+# Relay for people on strict networks (offices, some mobile carriers) where direct
+# media is blocked. Open 3478/udp in the firewall.
+turn:
+  enabled: true
+  domain: livekit.heyllow.com
+  udp_port: 3478

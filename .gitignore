@@ -34,3 +34,6 @@ cassandra_data/
 /src/generated/prisma
 
 /generated/prisma
+
+# A filled-in LiveKit config holds the API secret (it belongs in /etc/livekit, see deploy/livekit/README.md)
+deploy/livekit/livekit.yaml
