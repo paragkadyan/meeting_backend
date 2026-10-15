@@ -6,6 +6,8 @@ import { handleRooms } from "./room";
 import { handleMessages } from "./message";
 import { handleOfflineSync } from "./offline";
 import { socketAuth } from "../middleware/socket.auth";
+import { socketCorsOptions } from "../config/cors";
+import { prunePresence } from "./presenceJanitor";
 import { handleCallEvents } from "./call";
 
 let ioInstance: Server | null = null;
@@ -19,10 +21,7 @@ export const getIO = (): Server => {
 
 export const initSocket = async (httpServer: import("http").Server) => {
   const io = new Server(httpServer, {
-    cors: {
-      origin: process.env.FRONTEND_ORIGIN,
-      credentials: true,
-    },
+    cors: socketCorsOptions,
   });
 
   ioInstance = io;
@@ -36,6 +35,12 @@ export const initSocket = async (httpServer: import("http").Server) => {
   io.adapter(createAdapter(pub, sub));
 
   io.use(socketAuth);
+
+  // Clear presence left behind by a previous process (crash/restart). Delayed
+  // so the adapter is ready; failures are logged and harmless.
+  setTimeout(() => {
+    prunePresence(io).catch((error) => console.error("Presence cleanup failed:", error));
+  }, 3000);
 
   io.on("connection", (socket) => {
     const userId = socket.data.user.id;

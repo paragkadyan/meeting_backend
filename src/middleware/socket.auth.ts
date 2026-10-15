@@ -4,6 +4,20 @@ import { isRefreshTokenActive } from "../services/token.service";
 
 export const socketAuth = async (socket: Socket, next: (err?: Error) => void) => {
   try {
+    // Mobile clients can't send cookies over a native WebSocket; they pass the
+    // access token in the handshake `auth` payload instead. An invalid token is
+    // rejected outright (the client refreshes and reconnects).
+    const handshakeToken = socket.handshake.auth?.token;
+    if (typeof handshakeToken === "string" && handshakeToken) {
+      try {
+        const decoded = verifyAccessToken(handshakeToken);
+        socket.data.user = { id: decoded.userId };
+        return next();
+      } catch (error) {
+        return next(new Error("Invalid or expired tokens"));
+      }
+    }
+
     const raw = socket.handshake.headers.cookie;
     if (!raw) return next(new Error("No cookies"));
 

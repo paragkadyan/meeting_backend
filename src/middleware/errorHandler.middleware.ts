@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { apiError } from "../utils/apiError";
 import { logger } from "../logger/logger";
+import { NODE_ENV } from "../config/env";
 
 export const errorHandler = (
   err: any,
@@ -21,7 +22,8 @@ export const errorHandler = (
 
   res.status(500).json({
     success: false,
-    error: err.message,
+    // Raw messages can include query/internal details; only show them in development.
+    ...(NODE_ENV !== "production" && { error: err.message }),
     message: "Internal Server Error",
   });
 };

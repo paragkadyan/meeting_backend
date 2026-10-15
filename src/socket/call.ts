@@ -1,8 +1,8 @@
 import { Socket } from "socket.io";
-import { cancelCall, endCall, respondToCall } from "../services/call.service";
+import { cancelCall, endCall, leaveCall, respondToCall } from "../services/call.service";
 import { apiError } from "../utils/apiError";
 
-type CallSocketEvent = "callAccept" | "callReject" | "callBusy" | "callCancel" | "callEnd";
+type CallSocketEvent = "callAccept" | "callReject" | "callBusy" | "callCancel" | "callEnd" | "callLeave";
 
 export const handleCallEvents = (socket: Socket) => {
   const userId = socket.data.user.id as string;
@@ -12,6 +12,7 @@ export const handleCallEvents = (socket: Socket) => {
     ["callBusy", (callId) => respondToCall(callId, userId, "busy")],
     ["callCancel", (callId) => cancelCall(callId, userId)],
     ["callEnd", (callId) => endCall(callId, userId)],
+    ["callLeave", (callId) => leaveCall(callId, userId)],
   ];
 
   for (const [event, handler] of handlers) {

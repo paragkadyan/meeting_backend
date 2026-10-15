@@ -19,6 +19,8 @@ export const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN;
 export const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN;
 export const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 export const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN;
+/** Extra allowed browser origins, comma-separated (see config/cors.ts). */
+export const CORS_ORIGINS = process.env.CORS_ORIGINS;
 export const COOKIE_SECURE = NODE_ENV === 'production';
 export const FROM_EMAIL = process.env.FROM_EMAIL;
 export const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -38,6 +40,8 @@ export const VAPID_SUBJECT = process.env.VAPID_SUBJECT;
 export const LIVEKIT_URL = process.env.LIVEKIT_URL;
 export const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
 export const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
+/** LiveKit address handed to browsers/apps, when it differs from LIVEKIT_URL (which the server uses). */
+export const LIVEKIT_PUBLIC_URL = process.env.LIVEKIT_PUBLIC_URL;
 export const PUSH_NOTIFICATION_ASSETS_BASE_URL = process.env.PUSH_NOTIFICATION_ASSETS_BASE_URL || '/assets';
 export const PUSH_NOTIFICATION_ICON_PATH = process.env.PUSH_NOTIFICATION_ICON_PATH || `${PUSH_NOTIFICATION_ASSETS_BASE_URL}/notification-icon.svg`;
 export const PUSH_NOTIFICATION_BADGE_PATH = process.env.PUSH_NOTIFICATION_BADGE_PATH || `${PUSH_NOTIFICATION_ASSETS_BASE_URL}/notification-badge.svg`;

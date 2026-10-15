@@ -34,8 +34,9 @@ router.route("/resetPassword").post(
     resetPassword
 )
 
+// Public: authorized by the refresh token itself (see logout controller).
 router.route("/logout").post(
-    authMiddleware, logout
+    logout
 )
 
 router.route("/changePassword").put(

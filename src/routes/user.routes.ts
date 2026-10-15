@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { addNewUsersToGroup, assignAdminRole, createDirectChat, createGroupChat, deleteChatForUser, getConversations, getMessageReadReceipts, getMessages, getMessagesAround, getNewerMessages, getOlderMessages, getUsersBatch, groupLeaveByUser, groupUpdate, kickUserFromGroup, lastReadMessageByUser, removeAdminRole, updateConversationPreferences, userLastSeen, } from '../controllers/chat.controller';
-import { blockUser, unblockUser } from '../controllers/user.controller';
+import { blockUser, getBlockedUsers, unblockUser } from '../controllers/user.controller';
 import { imageUploadMiddleware } from '../middleware/imageUpload.middleware';
 import { deletePushSubscription, registerPushSubscription, updatePushSubscription } from '../controllers/pushSubscription.controller';
+import { deleteMobilePushToken, registerMobilePushToken } from '../controllers/mobilePushToken.controller';
 
 
 const router = Router();
@@ -89,6 +90,10 @@ router.route('/unblock-user').post(
     authMiddleware, unblockUser
 );
 
+router.route('/blocked-users').get(
+    authMiddleware, getBlockedUsers
+);
+
 router.route('/push-subscriptions').post(
     authMiddleware, registerPushSubscription
 );
@@ -99,6 +104,13 @@ router.route('/push-subscriptions/:subscriptionId').put(
 
 router.route('/push-subscriptions/:subscriptionId').delete(
     authMiddleware, deletePushSubscription
+);
+
+// Mobile app (Expo) push tokens; the web uses /push-subscriptions above.
+router.route('/mobile-push-tokens').post(
+    authMiddleware, registerMobilePushToken
+).delete(
+    authMiddleware, deleteMobilePushToken
 );
 
 router.route('/delete-chat/:convoId').delete(

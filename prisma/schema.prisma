@@ -19,6 +19,11 @@ enum AuthProvider {
   BOTH
 }
 
+enum CallType {
+  AUDIO
+  VIDEO
+}
+
 enum CallStatus {
   RINGING
   ACTIVE
@@ -70,6 +75,7 @@ model User {
   blockedByUsers UserBlock[] @relation("Blocked")
   mediaFiles     MediaFile[]
   pushSubscriptions PushSubscription[]
+  mobilePushTokens  MobilePushToken[]
   initiatedCalls    Call[]              @relation("CallInitiator")
   callParticipations CallParticipant[]
 
@@ -125,6 +131,7 @@ model Call {
   convoId     String
   roomName    String     @unique
   initiatedBy String
+  type        CallType   @default(AUDIO)
   status      CallStatus @default(RINGING)
   startedAt   DateTime?
   endedAt     DateTime?
@@ -258,4 +265,19 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+/// Expo push tokens for the mobile app (one per installed device).
+model MobilePushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mobile_push_tokens")
 }

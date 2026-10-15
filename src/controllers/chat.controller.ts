@@ -5,12 +5,26 @@ import { apiError } from "../utils/apiError";
 import { v4 as uuidv4 } from "uuid";
 import { redis } from "../db/redis";
 import { prisma } from '../db/post';
+import { assertConversationAccess } from '../utils/conversationAccess';
 import { getIO } from '../socket/index';
 import { replaceGroupAvatar } from '../services/minioAsset.service';
 import { types } from "cassandra-driver";
 
+/** Tells newly added members' clients to show the conversation right away. */
+const announceConversation = (convoId: string, userIds: string[]) => {
+  try {
+    const io = getIO();
+    userIds.forEach((id) => io.to(`user:${id}`).emit('conversationAdded', { convoId }));
+  } catch (error) {
+    console.error('Failed to emit conversationAdded:', error);
+  }
+};
+
 export const createDirectChat = asyncHandler(async (req, res) => {
-  const { participants, creatorID } = req.body;
+  const { participants } = req.body;
+  // The creator is whoever is signed in. Trusting a body field let a user
+  // create conversations in someone else's name.
+  const creatorID = req.user!.id;
 
   if (!Array.isArray(participants)) {
     throw new apiError(400, "Participants must be an array");
@@ -329,6 +343,7 @@ export const createGroupChat = asyncHandler(async (req, res) => {
     `convo:${conversation.id}:participants`,
     uniqueParticipants
   );
+  announceConversation(conversation.id, uniqueParticipants.filter((id) => id !== creatorID));
 
   return res.status(201).json(
     new apiResponse(
@@ -577,6 +592,8 @@ export const getMessages = asyncHandler(async (req, res) => {
     throw new apiError(400, "convoId is required");
   }
 
+  await assertConversationAccess(convoId, req.user!.id);
+
   // Get this user's chat deletion boundary.
   const convoState = await prisma.conversationByUser.findUnique({
     where: {
@@ -802,6 +819,8 @@ export const getOlderMessages = asyncHandler(async (req, res) => {
       .json(new apiResponse(400, null, "Missing pagination params"));
   }
 
+  await assertConversationAccess(convoId, req.user!.id);
+
   // Get the user's delete cutoff for this conversation
   const convoState = await prisma.conversationByUser.findUnique({
     where: {
@@ -977,6 +996,8 @@ export const getNewerMessages = asyncHandler(async (req, res) => {
       .status(400)
       .json(new apiResponse(400, null, "Missing pagination params"));
   }
+
+  await assertConversationAccess(convoId, req.user!.id);
 
   // Get this user's chat deletion point
   const convoState = await prisma.conversationByUser.findUnique({
@@ -1162,6 +1183,8 @@ export const getMessagesAround = asyncHandler(async (req, res) => {
   if (!convoId || !messageId) {
     throw new apiError(400, "convoId and messageId are required");
   }
+
+  await assertConversationAccess(convoId, req.user!.id);
 
   /*
    * Check whether this user deleted the conversation.
@@ -1692,6 +1715,7 @@ export const addNewUsersToGroup = asyncHandler(async (req, res) => {
     `convo:${convoId}:participants`,
     [...usersToCreate, ...usersToReactivate]
   );
+  announceConversation(convoId, [...usersToCreate, ...usersToReactivate]);
 
   return res.status(200).json(
     new apiResponse(200, { usersAdded: [...usersToCreate, ...usersToReactivate] }, "Users added to group")
@@ -1765,6 +1789,8 @@ export const getMessageReadReceipts = asyncHandler(async (req, res) => {
     throw new apiError(400, "messageId and convoId are required");
   }
 
+  await assertConversationAccess(convoId, req.user!.id);
+
   const query = `
     SELECT userID, readAt
     FROM message_reads
@@ -1793,6 +1819,7 @@ export const lastReadMessageByUser = asyncHandler(async (req, res) => {
   if (!convoId || !Array.isArray(userIds) || userIds.length === 0) {
     throw new apiError(400, "convoId and userIds are required");
   }
+  await assertConversationAccess(convoId, req.user!.id);
   const lastReadMap: Record<string, string | null> = {};
 
   await Promise.all(userIds.map(async (userId: string) => {
