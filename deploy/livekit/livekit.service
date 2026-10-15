@@ -1,0 +1,25 @@
+# systemd service for self-hosted LiveKit (no Docker). See README.md in this folder.
+# Install: sudo cp livekit.service /etc/systemd/system/ && sudo systemctl enable --now livekit
+[Unit]
+Description=LiveKit server (Heyllow calls)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Runs as its own unprivileged user (created in README step 3).
+User=livekit
+Group=livekit
+ExecStart=/usr/local/bin/livekit-server --config /etc/livekit/livekit.yaml
+Restart=on-failure
+RestartSec=5
+# Each call participant uses several sockets.
+LimitNOFILE=65536
+
+# Hardening: LiveKit only needs to read its config and use the network.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
