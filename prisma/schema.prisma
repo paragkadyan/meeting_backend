@@ -19,6 +19,25 @@ enum AuthProvider {
   BOTH
 }
 
+enum CallStatus {
+  RINGING
+  ACTIVE
+  ENDED
+  REJECTED
+  MISSED
+  CANCELLED
+}
+
+enum CallParticipantStatus {
+  RINGING
+  ACCEPTED
+  REJECTED
+  BUSY
+  JOINED
+  LEFT
+  MISSED
+}
+
 
 
 
@@ -51,6 +70,8 @@ model User {
   blockedByUsers UserBlock[] @relation("Blocked")
   mediaFiles     MediaFile[]
   pushSubscriptions PushSubscription[]
+  initiatedCalls    Call[]              @relation("CallInitiator")
+  callParticipations CallParticipant[]
 
   @@index([email])
   @@index([mobileNumber])
@@ -96,6 +117,42 @@ model Conversation {
   creator     User     @relation("Creator", fields: [creatorId], references: [id])
   participants ConversationParticipant[]
   convoStates  ConversationByUser[]
+  calls        Call[]
+}
+
+model Call {
+  id          String     @id @default(uuid())
+  convoId     String
+  roomName    String     @unique
+  initiatedBy String
+  status      CallStatus @default(RINGING)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  conversation Conversation       @relation(fields: [convoId], references: [id], onDelete: Cascade)
+  initiator    User               @relation("CallInitiator", fields: [initiatedBy], references: [id], onDelete: Cascade)
+  participants CallParticipant[]
+
+  @@index([convoId, createdAt])
+  @@index([status, createdAt])
+}
+
+model CallParticipant {
+  callId    String
+  userId    String
+  status    CallParticipantStatus @default(RINGING)
+  joinedAt  DateTime?
+  leftAt    DateTime?
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([callId, userId])
+  @@index([userId, status])
 }
 
 

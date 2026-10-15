@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc && copyfiles -u 2 src/templates/**/*.html dist/src/templates",
+    "test": "npm run build && node --test",
     "start": "node dist/server.js"
   },
   "dependencies": {
@@ -25,9 +26,10 @@
     "google-auth-library": "^10.5.0",
     "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
+    "livekit-server-sdk": "^2.19.1",
     "minio": "^8.0.6",
     "multer": "^2.0.2",
-    "nodemailer": "^7.0.11",
+    "nodemailer": "^10.1.1",
     "pg": "^8.16.3",
     "redis": "^5.9.0",
     "resend": "^6.0.2",

@@ -30,11 +30,20 @@ services:
     volumes:
       - redis_data:/data
 
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    container_name: livekit_server
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "127.0.0.1:7880:7880"
+      - "127.0.0.1:7881:7881"
+      - "127.0.0.1:55000-55050:55000-55050/udp"
+
   redis-gui:
     image: rediscommander/redis-commander:latest
     container_name: redis_gui
     environment:
-      - REDIS_HOSTS=local:redis:6379
+      REDIS_HOSTS: local:redis:6379
     ports:
       - "8081:8081"
 
@@ -50,11 +59,11 @@ services:
       - pgadmin_data:/var/lib/pgadmin
 
   minio:
-    image: quay.io/minio/minio
+    image: quay.io/minio/aistor/minio:latest
     container_name: minio_server
     ports:
-      - "9000:9000"   # API
-      - "9001:9001"   # Console
+      - "9000:9000"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin

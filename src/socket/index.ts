@@ -6,6 +6,7 @@ import { handleRooms } from "./room";
 import { handleMessages } from "./message";
 import { handleOfflineSync } from "./offline";
 import { socketAuth } from "../middleware/socket.auth";
+import { handleCallEvents } from "./call";
 
 let ioInstance: Server | null = null;
 
@@ -45,6 +46,7 @@ export const initSocket = async (httpServer: import("http").Server) => {
     handleRooms(socket);
     handleMessages(io, socket);
     handleOfflineSync(socket);
+    handleCallEvents(socket);
   });
 
   process.on("SIGINT", async () => {

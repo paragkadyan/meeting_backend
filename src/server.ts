@@ -8,20 +8,43 @@ import http from "http";
 import { initSocket } from "./socket";
 import { ensureMediaBucket } from "./config/minio";
 import { logger } from "./logger/logger";
+import { startCallTimeoutWorker } from "./services/call.service";
 
 (async () => {
-  try{
-  await connectPostgres();
-  await connectCassandra();
-  await connectRedis();
-  await ensureMediaBucket();
+  let step = "PostgreSQL";
+
+  try {
+    await connectPostgres();
+
+    step = "Cassandra";
+    await connectCassandra();
+
+    step = "Redis";
+    await connectRedis();
+
+    step = "MinIO bucket initialization";
+    await ensureMediaBucket();
   } catch (error) {
-    throw new apiError(500, 'Database connection failed', [error as Error]);
+    logger.error(`Startup failed at ${step}`, {
+      error: error instanceof Error
+        ? error.message
+        : String(error),
+      stack: error instanceof Error
+        ? error.stack
+        : undefined,
+    });
+
+    throw new apiError(500, "Database connection failed", [
+      error instanceof Error ? error : new Error(String(error)),
+    ]);
   }
 
-const server = http.createServer(app);
+  const server = http.createServer(app);
 
-initSocket(server);
+  initSocket(server);
+  startCallTimeoutWorker();
 
-server.listen(PORT, () => { logger.info(`Server running on http://localhost:${PORT}`); });
+  server.listen(PORT, () => {
+    logger.info(`Server running on http://localhost:${PORT}`);
+  });
 })();
