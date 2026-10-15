@@ -1,4 +1,4 @@
-import { bucketName, minioClient } from "../../config/minio";
+import { bucketName, minioClient, presignClient } from "../../config/minio";
 
 const PRESIGNED_EXPIRY_SECONDS = Number(process.env.MINIO_PRESIGNED_EXPIRY_SECONDS || 60);
 
@@ -20,7 +20,8 @@ export async function getPresignedGetUrl(objectKey: string, fileName?: string): 
       }
     : undefined;
 
-  return minioClient.presignedGetObject(bucketName, objectKey, PRESIGNED_EXPIRY_SECONDS, reqParams);
+  // Signed for the client-reachable host (see presignClient in config/minio.ts).
+  return presignClient.presignedGetObject(bucketName, objectKey, PRESIGNED_EXPIRY_SECONDS, reqParams);
 }
 
 export async function deleteObject(objectKey: string): Promise<void> {

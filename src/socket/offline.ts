@@ -1,11 +1,15 @@
 import { Socket } from 'socket.io';
 import { cassandra } from '../db/cassa';
 import { redis } from '../db/redis';
+import { hasConversationAccess } from '../utils/conversationAccess';
 
 export const handleOfflineSync = async (socket: Socket) => {
   const userId = socket.data.user.id;
 
   socket.on('syncMessages', async ({ convoId, lastKnownMessageId }) => {
+    // Previously returned any conversation's messages to any connected user.
+    if (!(await hasConversationAccess(convoId, userId))) return;
+
     const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
     
     const messages = await cassandra.execute(

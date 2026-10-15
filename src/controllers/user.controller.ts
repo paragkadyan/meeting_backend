@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
-import { signAccessToken, signRefreshToken, verifyRefreshToken, getTokenMaxAge } from '../utils/jwt';
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { registerRefreshToken, revokeRefreshToken, revokeAllOnCompromise, rotateRefreshToken } from '../services/token.service';
-import { COOKIE_DOMAIN, COOKIE_SECURE, FRONTEND_ORIGIN } from '../config/env';
+import { COOKIE_DOMAIN, FRONTEND_ORIGIN } from '../config/env';
 import { prisma } from '../db/post';
 import { asyncHandler } from "../utils/asyncHandler";
 import { generateOTP, getOTP, genResetToken, getResetToken, clearOTP } from '../services/auth.service';
@@ -13,6 +13,7 @@ import { apiResponse } from '../utils/apiResponse';
 import { apiError } from '../utils/apiError';
 import { verifyGoogleToken } from '../utils/googleAuth';
 import { redis } from '../db/redis';
+import { clearSessionCookies, deliverSession, getRefreshTokenFromRequest, isMobileClient } from '../utils/session';
 import { deleteProfilePicture, replaceProfilePicture } from '../services/minioAsset.service';
 
 export const signup = asyncHandler(async (req: Request, res: Response) => {
@@ -121,26 +122,9 @@ export const verifySignupOTP = asyncHandler(async (req: Request, res: Response) 
 
   await registerRefreshToken(newUser.id, jti, refreshToken);
 
-  res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: 'none',
-    maxAge: getTokenMaxAge(accessToken),
-    // domain: COOKIE_DOMAIN,
-    path: '/',
-  });
+  const session = deliverSession(req, res, { accessToken, refreshToken });
 
-
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: 'none',
-    maxAge: getTokenMaxAge(refreshToken),
-    // domain: COOKIE_DOMAIN,
-    path: '/',
-  });
-
-  const response = new apiResponse(201, { user: { id: newUser.id, email: newUser.email, name: newUser.name, lname: newUser.lname }, accessToken }, 'Signup successful.');
+  const response = new apiResponse(201, { user: { id: newUser.id, email: newUser.email, name: newUser.name, lname: newUser.lname }, accessToken, ...session }, 'Signup successful.');
   return res.status(201).json(response);
 
 });;
@@ -166,26 +150,9 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   await registerRefreshToken(user.id, jti, refreshToken);
 
 
-  res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: 'none',
-    maxAge: getTokenMaxAge(accessToken),
-    // domain: COOKIE_DOMAIN,
-    path: '/',
-  });
+  const session = deliverSession(req, res, { accessToken, refreshToken });
 
-
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: 'none',
-    maxAge: getTokenMaxAge(refreshToken),
-    // domain: COOKIE_DOMAIN,
-    path: '/',
-  });
-
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken }, 'login successful');
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, lname: user.lname, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken, ...session }, 'login successful');
   return res.status(200).json(response);
 });
 
@@ -274,16 +241,21 @@ export const resetPassword = asyncHandler(async (req, res) => {
   return res.status(200).json(response);
 });
 
+// Public route: possession of the refresh token is what authorizes revoking
+// it. Requiring a valid access token here meant an expired session couldn't
+// log out cleanly (the old refresh token had already been rotated away).
 export const logout = asyncHandler(async (req: Request, res: Response) => {
-  const token = req.cookies.refreshToken;
+  const token = getRefreshTokenFromRequest(req);
   if (token) {
-    const payload = verifyRefreshToken(token);
-    if (payload.userId && payload.jti) await revokeRefreshToken(payload.userId, payload.jti);
+    try {
+      const payload = verifyRefreshToken(token);
+      if (payload.userId && payload.jti) await revokeRefreshToken(payload.userId, payload.jti);
+    } catch (error) {
+      // Already expired or invalid: nothing to revoke, still log out.
+    }
   }
 
-
-  res.clearCookie('accessToken', { path: '/' });
-  res.clearCookie('refreshToken', { path: '/' });
+  if (!isMobileClient(req)) clearSessionCookies(res);
 
   const response = new apiResponse(200, {}, 'Logout successful.');
   return res.json(response);
@@ -331,7 +303,20 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
     },
   });
   await revokeAllOnCompromise(user.id);
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob } }, 'Password changed successfully.');
+
+  // Every session was just revoked. The web client logs out after this (its
+  // existing flow); mobile clients get a fresh session so the device the
+  // change was made on stays signed in while all others are signed out.
+  let session: { accessToken?: string; refreshToken?: string } = {};
+  if (isMobileClient(req)) {
+    const jti = uuidv4();
+    const accessToken = signAccessToken({ userId: user.id });
+    const refreshToken = signRefreshToken({ userId: user.id, jti });
+    await registerRefreshToken(user.id, jti, refreshToken);
+    session = { accessToken, ...deliverSession(req, res, { accessToken, refreshToken }) };
+  }
+
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, phNumber: user.mobileNumber, dob: user.dob }, ...session }, 'Password changed successfully.');
   return res.status(200).json(response);
 });
 
@@ -358,6 +343,9 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     updateData.location = location;
   }
   if (dob) {
+    if (Number.isNaN(Date.parse(dob))) {
+      throw new apiError(400, 'Date of birth must be a valid date.');
+    }
     updateData.dob = dob;
   }
   if (mobileNumber) {
@@ -379,10 +367,19 @@ export const editProfile = asyncHandler(async (req: Request, res: Response) => {
     throw new apiError(400, 'No data provided for update.');
   }
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: updateData,
-  });
+  let user;
+  try {
+    user = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+  } catch (error) {
+    // mobileNumber is unique; surface the clash instead of a generic 500.
+    if ((error as { code?: string })?.code === 'P2002') {
+      throw new apiError(409, 'This phone number is already used by another account.');
+    }
+    throw error;
+  }
 
   // Emit socket event to notify other users about profile update
   try {
@@ -488,22 +485,8 @@ export const loginWithGoogle = asyncHandler(async (req: Request, res: Response) 
 
   await registerRefreshToken(user.id, jti, refreshToken);
 
-  res.cookie("accessToken", accessToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: "none",
-    maxAge: getTokenMaxAge(accessToken),
-    path: "/",
-  });
-
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: COOKIE_SECURE,
-    sameSite: "none",
-    maxAge: getTokenMaxAge(refreshToken),
-    path: "/",
-  });
-  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken }, 'Login with Google successful.');
+  const session = deliverSession(req, res, { accessToken, refreshToken });
+  const response = new apiResponse(200, { user: { id: user.id, email: user.email, name: user.name, profilePhoto: user.profileURL, authProvider: user.authProvider, phNumber: user.mobileNumber, dob: user.dob }, accessToken, ...session }, 'Login with Google successful.');
   return res.status(200).json(response);
 }
 );
@@ -687,7 +670,7 @@ export const getBlockedUsers = asyncHandler(async (req: Request, res: Response) 
 
 export const refreshAccessToken = asyncHandler(
   async (req: Request, res: Response) => {
-    const oldRefreshToken = req.cookies?.refreshToken;
+    const oldRefreshToken = getRefreshTokenFromRequest(req);
 
     if (!oldRefreshToken) {
       throw new apiError(401, 'Refresh token missing');
@@ -700,8 +683,7 @@ export const refreshAccessToken = asyncHandler(
       // An actually expired or malformed JWT cannot recover. Preserve the
       // existing cookie-clearing behavior for this case only; a concurrent
       // rotation must not erase the replacement cookies set by another request.
-      res.clearCookie('accessToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
-      res.clearCookie('refreshToken', { path: '/', sameSite: 'none', secure: COOKIE_SECURE, httpOnly: true });
+      if (!isMobileClient(req)) clearSessionCookies(res);
       throw new apiError(401, 'Refresh token expired or invalid');
     }
 
@@ -715,18 +697,10 @@ export const refreshAccessToken = asyncHandler(
     const rotated = await rotateRefreshToken(payload.userId, payload.jti, newJti, newRefreshToken);
     if (!rotated) throw new apiError(401, 'Session compromised or expired');
 
-    const cookieOptions = {
-      httpOnly: true,
-      secure: COOKIE_SECURE,
-      sameSite: 'none' as const,
-      path: '/',
-    };
-
-    res.cookie('accessToken', newAccessToken, { ...cookieOptions, maxAge: getTokenMaxAge(newAccessToken) });
-    res.cookie('refreshToken', newRefreshToken, { ...cookieOptions, maxAge: getTokenMaxAge(newRefreshToken) });
+    const session = deliverSession(req, res, { accessToken: newAccessToken, refreshToken: newRefreshToken });
 
     return res.status(200).json(
-      new apiResponse(200, { accessToken: newAccessToken }, 'Token refreshed successfully')
+      new apiResponse(200, { accessToken: newAccessToken, ...session }, 'Token refreshed successfully')
     );
   }
 );

@@ -5,11 +5,27 @@ import { redis } from '../db/redis';
 import { prisma } from '../db/post';
 import { pushNotificationService } from '../services/pushNotification.service';
 import { logger } from '../logger/logger';
+import { getParticipantIds, hasConversationAccess, isActiveParticipant } from '../utils/conversationAccess';
+
+// Matches the web client's edit window (MessageBubble isWithinEditWindow),
+// plus a minute of grace for clock skew and slow submits.
+const EDIT_WINDOW_MS = 16 * 60 * 1000;
+
+/** Loads the fields needed to authorize an edit/delete. Null if not found. */
+const getMessageForAction = async (convoId: string, bucket: number, messageId: string) => {
+  const result = await cassandra.execute(
+    // messageID is selected for its embedded timestamp (edit window check).
+    `SELECT messageID, senderID, messageType, isDeleted FROM messages WHERE convoID = ? AND bucket = ? AND messageID = ?`,
+    [convoId, bucket, messageId],
+    { prepare: true }
+  );
+  return result.first() ?? null;
+};
 
 export const handleMessages = async (io: Server, socket: Socket) => {
   const userId = socket.data.user.id;
 
-  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, replyToMessageContent = null, replyToMessageType = null, replyToMessageSenderID = null, systemType = null, actorId = null, targetUserId = null }) => {
+  socket.on('sendMessage', async ({ convoId, content, messageType = 'text', attachments = [], replyToMessageID = null, replyToMessageContent = null, replyToMessageType = null, replyToMessageSenderID = null, systemType = null, actorId: _clientActorId = null, targetUserId = null }) => {
     try {
       const normalizedContent = typeof content === 'string' ? content : '';
       const normalizedAttachments = Array.isArray(attachments)
@@ -23,23 +39,27 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         return;
       }
 
-      let participants = await redis.sMembers(`convo:${convoId}:participants`);
+      if (!(await isActiveParticipant(convoId, userId))) {
+        socket.emit('error', { message: 'You are not a member of this conversation' });
+        return;
+      }
 
-      if (!participants || participants.length === 0) {
-        try {
-          const dbParts = await prisma.conversationParticipant.findMany({
-            where: { convoId },
-            select: { userId: true },
-          });
-          const dbIds = dbParts.map((p) => p.userId);
-          if (dbIds.length > 0) {
-            await redis.sAdd(`convo:${convoId}:participants`, dbIds);
-            participants = dbIds;
-          }
-        } catch (err) {
-          console.error('Failed to load convo participants from DB:', err);
+      // System notices ("X left", "X added Y") are posted by clients. The actor is
+      // always the sender, and only group admins may announce adds/removals.
+      const isSystem = messageType === 'system';
+      const actorId = isSystem ? userId : null;
+      if (isSystem && (systemType === 'user_added' || systemType === 'user_kicked')) {
+        const role = await prisma.conversationParticipant.findUnique({
+          where: { convoId_userId: { convoId, userId } },
+          select: { role: true },
+        });
+        if (role?.role !== 'admin') {
+          socket.emit('error', { message: 'Only group admins can post that notice' });
+          return;
         }
       }
+
+      const participants = await getParticipantIds(convoId);
 
       if (participants.length === 2) {
         const otherUserId = participants.find((id: string) => id !== userId);
@@ -73,8 +93,11 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         normalizedContent.trim() ||
         (normalizedAttachments.length > 0 ? messageType : '');
 
+      // leftAt: null skips people who left the group: a new message (even the
+      // "X left" notice racing the leave request) must not bring it back for them.
+      // A chat someone merely deleted (leftAt still null) does reappear, as intended.
       await prisma.conversationByUser.updateMany({
-        where: { convoId },
+        where: { convoId, leftAt: null },
         data: {
           lastMessage: conversationPreview,
           lastMessageSenderId: userId,
@@ -85,7 +108,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
       });
 
       await prisma.conversationByUser.updateMany({
-        where: { convoId, userId: { not: userId } },
+        where: { convoId, userId: { not: userId }, leftAt: null },
         data: {
           unreadCount: { increment: 1 },
         },
@@ -145,7 +168,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           ]);
 
           if (!isOnline || !isActivelyViewing) {
-            pushNotificationTasks.push(pushNotificationService.sendNewMessageNotification(participantId));
+            pushNotificationTasks.push(pushNotificationService.sendNewMessageNotification(participantId, { convoId }));
           }
         }
       }
@@ -170,6 +193,11 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
   socket.on('messageReaction', async ({ convoId, messageId, reaction }) => {
     try {
+      if (!(await isActiveParticipant(convoId, userId))) {
+        socket.emit('error', { message: 'You are not a member of this conversation' });
+        return;
+      }
+
       io.to(`room:${convoId}`).emit('messageReaction', {
         convoId,
         messageId,
@@ -233,6 +261,9 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
   socket.on('markRead', async ({ convoId, lastMessageId }) => {
     try {
+      // Ex-members may still open old group history, so this needs read access only.
+      if (!(await hasConversationAccess(convoId, userId))) return;
+
       await redis.del(`unread:${userId}:${convoId}`);
       if (lastMessageId) {
         await redis.set(`conv:${convoId}:user:${userId}:lastRead`, String(lastMessageId));
@@ -260,7 +291,10 @@ export const handleMessages = async (io: Server, socket: Socket) => {
     }
   });
 
+  // Typing fires on every keystroke, so instead of a DB lookup, only relay
+  // from sockets that joined the room (joinRoom verifies membership).
   socket.on('typing', ({ convoId, isTyping }) => {
+    if (!socket.rooms.has(`room:${convoId}`)) return;
     socket.to(`room:${convoId}`).emit('typing', {
       userId,
       convoId,
@@ -269,6 +303,7 @@ export const handleMessages = async (io: Server, socket: Socket) => {
   });
 
   socket.on('stopTyping', ({ convoId }) => {
+    if (!socket.rooms.has(`room:${convoId}`)) return;
     socket.to(`room:${convoId}`).emit('typing', {
       userId,
       convoId,
@@ -278,6 +313,31 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
   socket.on('editMessage', async ({ convoId, messageId, newContent, bucket }) => {
     try {
+      if (typeof newContent !== 'string' || !newContent.trim()) {
+        socket.emit('error', { message: 'Message content is required' });
+        return;
+      }
+      if (!(await isActiveParticipant(convoId, userId))) {
+        socket.emit('error', { message: 'You are not a member of this conversation' });
+        return;
+      }
+
+      // Without this check anyone could rewrite anyone's message. It also stops
+      // a wrong bucket from upserting a ghost row (Cassandra UPDATE inserts).
+      const target = await getMessageForAction(convoId, bucket, messageId);
+      const sentAt = target?.messageid?.getDate?.() as Date | undefined;
+      if (
+        !target ||
+        target.isdeleted ||
+        String(target.senderid) !== userId ||
+        target.messagetype !== 'text' ||
+        !sentAt ||
+        Date.now() - sentAt.getTime() > EDIT_WINDOW_MS
+      ) {
+        socket.emit('error', { message: 'You can only edit your own text messages within 15 minutes' });
+        return;
+      }
+
       await cassandra.execute(
         `
         UPDATE messages
@@ -318,6 +378,17 @@ export const handleMessages = async (io: Server, socket: Socket) => {
 
   socket.on('deleteMessage', async ({ convoId, messageId, bucket }) => {
     try {
+      if (!(await isActiveParticipant(convoId, userId))) {
+        socket.emit('error', { message: 'You are not a member of this conversation' });
+        return;
+      }
+
+      const target = await getMessageForAction(convoId, bucket, messageId);
+      if (!target || target.isdeleted || String(target.senderid) !== userId) {
+        socket.emit('error', { message: 'You can only delete your own messages' });
+        return;
+      }
+
       await cassandra.execute(
         `
         UPDATE messages

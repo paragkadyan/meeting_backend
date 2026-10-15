@@ -59,7 +59,7 @@ services:
       - pgadmin_data:/var/lib/pgadmin
 
   minio:
-    image: quay.io/minio/aistor/minio:latest
+    image: quay.io/minio/minio
     container_name: minio_server
     ports:
       - "9000:9000"

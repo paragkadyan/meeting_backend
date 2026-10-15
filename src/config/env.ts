@@ -19,6 +19,8 @@ export const ACCESS_TOKEN_EXPIRES_IN = process.env.ACCESS_TOKEN_EXPIRES_IN;
 export const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN;
 export const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN;
 export const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN;
+/** Extra allowed browser origins, comma-separated (see config/cors.ts). */
+export const CORS_ORIGINS = process.env.CORS_ORIGINS;
 export const COOKIE_SECURE = NODE_ENV === 'production';
 export const FROM_EMAIL = process.env.FROM_EMAIL;
 export const RESEND_API_KEY = process.env.RESEND_API_KEY;

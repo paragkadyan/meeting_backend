@@ -1,6 +1,7 @@
 import webpush, { PushSubscription as WebPushSubscription } from 'web-push';
 import { prisma } from '../db/post';
 import { logger } from '../logger/logger';
+import { sendExpoPush } from './expoPush.service';
 import {
   PUSH_NOTIFICATION_BADGE_PATH,
   PUSH_NOTIFICATION_ICON_PATH,
@@ -21,6 +22,8 @@ const RETRY_BASE_DELAY_MS = 500;
 const PUSH_TTL_SECONDS = 60 * 60;
 const PUSH_NOTIFICATION_TITLE = 'New Message';
 const PUSH_NOTIFICATION_BODY = 'You have a new message';
+// Must match the Android channel the app creates (heyllow-mobile notifications setup).
+const MOBILE_CHANNEL_ID = 'messages';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -35,9 +38,33 @@ class PushNotificationService {
     }
   }
 
-  async sendNewMessageNotification(userId: string): Promise<void> {
+  async sendNewMessageNotification(userId: string, context: { convoId?: string } = {}): Promise<void> {
+    // Mobile (Expo) and web push are independent: missing VAPID keys only
+    // disable the web half.
+    await Promise.allSettled([this.sendMobile(userId, context), this.sendWeb(userId)]);
+  }
+
+  /** Same generic, content-free wording as web push; tapping opens the chat. */
+  private async sendMobile(userId: string, context: { convoId?: string }): Promise<void> {
+    const tokens = await prisma.mobilePushToken.findMany({ where: { userId }, select: { token: true } });
+    if (tokens.length === 0) return;
+
+    await sendExpoPush(
+      tokens.map(({ token }) => ({
+        to: token,
+        title: PUSH_NOTIFICATION_TITLE,
+        body: PUSH_NOTIFICATION_BODY,
+        data: { type: 'message', ...(context.convoId && { convoId: context.convoId }) },
+        sound: 'default' as const,
+        channelId: MOBILE_CHANNEL_ID,
+        priority: 'high' as const,
+      }))
+    );
+  }
+
+  private async sendWeb(userId: string): Promise<void> {
     if (!this.enabled) {
-      logger.warn('Push notification skipped because VAPID configuration is incomplete', { userId });
+      logger.warn('Web push skipped because VAPID configuration is incomplete', { userId });
       return;
     }
 
