@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc && copyfiles -u 2 src/templates/**/*.html dist/src/templates",
-    "test": "npm run build && node --test",
+    "test": "npm run build && node --test tests/*.test.cjs",
     "start": "node dist/server.js"
   },
   "dependencies": {

@@ -19,6 +19,11 @@ enum AuthProvider {
   BOTH
 }
 
+enum CallType {
+  AUDIO
+  VIDEO
+}
+
 enum CallStatus {
   RINGING
   ACTIVE
@@ -126,6 +131,7 @@ model Call {
   convoId     String
   roomName    String     @unique
   initiatedBy String
+  type        CallType   @default(AUDIO)
   status      CallStatus @default(RINGING)
   startedAt   DateTime?
   endedAt     DateTime?

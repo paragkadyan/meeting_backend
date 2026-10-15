@@ -3,8 +3,7 @@ import { types } from 'cassandra-driver';
 import { cassandra } from '../db/cassa';
 import { redis } from '../db/redis';
 import { prisma } from '../db/post';
-import { pushNotificationService } from '../services/pushNotification.service';
-import { logger } from '../logger/logger';
+import { createAndDeliverMessage } from '../services/message.service';
 import { getParticipantIds, hasConversationAccess, isActiveParticipant } from '../utils/conversationAccess';
 
 // Matches the web client's edit window (MessageBubble isWithinEditWindow),
@@ -78,110 +77,32 @@ export const handleMessages = async (io: Server, socket: Socket) => {
           }
         }
       }
-      const messageId = types.TimeUuid.now();
-      const bucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-      await cassandra.execute(
-        `INSERT INTO messages (
-          convoID, bucket, messageID, senderID, content, messageType, attachments, replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID, systemType, actorID, targetUserID
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [convoId, bucket, messageId, userId, normalizedContent, messageType, normalizedAttachments, replyToMessageID, replyToMessageContent, replyToMessageType, replyToMessageSenderID, systemType, actorId, targetUserId],
-        { prepare: true }
-      );
-
-      const conversationPreview =
-        normalizedContent.trim() ||
-        (normalizedAttachments.length > 0 ? messageType : '');
-
-      // leftAt: null skips people who left the group: a new message (even the
-      // "X left" notice racing the leave request) must not bring it back for them.
-      // A chat someone merely deleted (leftAt still null) does reappear, as intended.
-      await prisma.conversationByUser.updateMany({
-        where: { convoId, leftAt: null },
-        data: {
-          lastMessage: conversationPreview,
-          lastMessageSenderId: userId,
-          lastMessageAt: new Date(),
-          lastMessageId: messageId.toString(),
-          isActive: true
-        },
-      });
-
-      await prisma.conversationByUser.updateMany({
-        where: { convoId, userId: { not: userId }, leftAt: null },
-        data: {
-          unreadCount: { increment: 1 },
-        },
-      });
-
-      const message = {
-        convoId,
-        messageId,
-        senderId: userId,
-        content: normalizedContent,
-        bucket,
-        messageType,
-        attachments: normalizedAttachments,
-        replyToMessageID,
-        replyToMessageContent,
-        replyToMessageType,
-        replyToMessageSenderID,
-        systemType,
-        actorId,
-        targetUserId,
-        createdAt: new Date().toISOString(),
-      };
-
-      if (!participants || !Array.isArray(participants)) {
-        return;
-      }
-
-      const uniqueParticipants = Array.from(new Set(participants.map(p => String(p))));
-      const pushNotificationTasks: Promise<void>[] = [];
-
-      for (const participantId of uniqueParticipants) {
-        io.to(`user:${participantId}`).emit('newMessage', { ...message, messageId: messageId.toString(), });
-        const unreadKey = `unread:${participantId}:${convoId}`;
-        await redis.hSetNX(unreadKey, 'count', '0');
-        const unreadCount = await redis.hIncrBy(unreadKey, 'count', 1);
-
-        const metaKey = `user:${participantId}:convo:meta`;
-        await redis.hSet(
-          metaKey,
+      const uniqueParticipants = Array.from(new Set(participants.map((p) => String(p))));
+      const others = uniqueParticipants.filter((id) => id !== userId);
+      await createAndDeliverMessage(
+        io,
+        {
           convoId,
-          JSON.stringify({
-            lastMessage: conversationPreview,
-            lastMessageAt: Date.now(),
-            lastMessageSender: userId,
-          })
-        );
-
-        socket.to(`user:${participantId}`).emit('unreadUpdated', {
-          convoId,
-          unreadCount,
-        });
-
-        if (participantId !== userId) {
-          const [isOnline, isActivelyViewing] = await Promise.all([
-            redis.exists(`user:online:${participantId}`),
-            redis.sIsMember(`convo:${convoId}:activeViewers`, participantId),
-          ]);
-
-          if (!isOnline || !isActivelyViewing) {
-            pushNotificationTasks.push(pushNotificationService.sendNewMessageNotification(participantId, { convoId }));
-          }
+          senderId: userId,
+          content: normalizedContent,
+          messageType,
+          attachments: normalizedAttachments,
+          replyToMessageID,
+          replyToMessageContent,
+          replyToMessageType,
+          replyToMessageSenderID,
+          systemType,
+          actorId,
+          targetUserId,
+        },
+        {
+          participantIds: uniqueParticipants,
+          unreadUserIds: others,
+          liveUnreadUserIds: uniqueParticipants,
+          pushUserIds: others,
+          excludeSocketId: socket.id,
         }
-      }
-
-      if (pushNotificationTasks.length > 0) {
-        Promise.allSettled(pushNotificationTasks).then((results) => {
-          const failed = results.filter((result) => result.status === 'rejected').length;
-          if (failed > 0) {
-            logger.warn('One or more push notification tasks failed after message creation', { failed, total: results.length });
-          }
-        });
-      }
-      //socket.to(`room:${convoId}`).emit('newMessage', message);
+      );
 
       socket.emit('messageSent');
 

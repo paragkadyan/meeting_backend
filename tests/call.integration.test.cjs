@@ -10,6 +10,7 @@ process.env.JWT_ACCESS_SECRET = "access-secret-for-tests-only";
 
 const fakePrisma = {};
 const emitted = [];
+const closedRooms = [];
 function setFakePrisma(next) {
   for (const key of Object.keys(fakePrisma)) delete fakePrisma[key];
   Object.assign(fakePrisma, next);
@@ -24,6 +25,10 @@ Module._load = function (request, parent, isMain) {
           to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }),
         }),
       };
+    }
+    if (request === "./livekit.service") {
+      const real = originalLoad.call(this, request, parent, isMain);
+      return { ...real, closeLiveKitRoomIfPresent: async (roomName) => { closedRooms.push(roomName); } };
     }
   }
   return originalLoad.call(this, request, parent, isMain);
@@ -46,10 +51,13 @@ test("conversation member can start a call and notifications omit the room name"
     conversation: {
       findUnique: async () => ({
         id: "conversation-1",
+        type: "direct",
         participants: [{ userId: "user-1" }, { userId: "user-2" }],
       }),
     },
+    userBlock: { findFirst: async () => null },
     call: {
+      findFirst: async () => null,
       create: async ({ data }) => ({
         id: data.id,
         convoId: data.convoId,
@@ -94,7 +102,7 @@ test("call responses in an invalid state are rejected", async () => {
     call: {
       findUnique: async () => ({
         id: "call-1",
-        status: "ACTIVE",
+        status: "ENDED",
         participants: [{ status: "RINGING" }],
       }),
     },
@@ -114,6 +122,7 @@ test("LiveKit token is signed for the server-authenticated identity and scoped r
       }),
     },
     conversationParticipant: { findUnique: async () => ({ userId: "user-2" }) },
+    user: { findUnique: async () => ({ name: "Second", lname: "User" }) },
   });
 
   const result = await callService.createCallParticipantToken("call-1", "user-2");
@@ -158,4 +167,115 @@ test("missing LiveKit settings fail token creation", async () => {
     delete require.cache[serviceModulePath];
     delete require.cache[envModulePath];
   }
+});
+
+// --- Call lifecycle, against a small in-memory stand-in for the call tables ---
+
+const matches = (value, condition) =>
+  condition === undefined ||
+  (condition && typeof condition === "object" && Array.isArray(condition.in)
+    ? condition.in.includes(value)
+    : value === condition);
+
+function useCallStore({ status = "RINGING", type = "direct", participants }) {
+  const call = {
+    id: "call-1",
+    convoId: "conversation-1",
+    roomName: "room-1",
+    initiatedBy: "user-1",
+    type: "AUDIO",
+    status,
+    createdAt: new Date(),
+    conversation: { type },
+  };
+  const parts = participants.map(([userId, partStatus]) => ({ callId: "call-1", userId, status: partStatus }));
+  const withParticipants = (args = {}) => {
+    const where = (args.include || args.select || {}).participants?.where;
+    return { ...call, participants: parts.filter((p) => matches(p.userId, where?.userId)) };
+  };
+  const partsWhere = (where) =>
+    parts.filter((p) => matches(p.userId, where.userId) && matches(p.status, where.status));
+
+  setFakePrisma({
+    call: {
+      findUnique: async (args) => withParticipants(args),
+      updateMany: async ({ where, data }) => {
+        if (!matches(call.status, where.status)) return { count: 0 };
+        Object.assign(call, data);
+        return { count: 1 };
+      },
+    },
+    callParticipant: {
+      findMany: async () => parts.map(({ userId }) => ({ userId })),
+      updateMany: async ({ where, data }) => {
+        const rows = partsWhere(where);
+        rows.forEach((row) => Object.assign(row, data));
+        return { count: rows.length };
+      },
+      update: async ({ where, data }) => Object.assign(parts.find((p) => p.userId === where.callId_userId.userId), data),
+      create: async ({ data }) => { parts.push({ ...data }); return data; },
+    },
+    conversationParticipant: { findUnique: async () => ({ userId: "member" }) },
+    user: { findUnique: async () => ({ name: "Test", lname: "User" }) },
+  });
+  emitted.length = 0;
+  closedRooms.length = 0;
+  return { call, parts };
+}
+
+const events = (name) => emitted.filter(({ event }) => event === name);
+
+test("hanging up a 1:1 call ends it for both people and closes the room", async () => {
+  const { call } = useCallStore({ status: "ACTIVE", participants: [["user-1", "JOINED"], ["user-2", "JOINED"]] });
+  await callService.leaveCall("call-1", "user-2");
+  assert.equal(call.status, "ENDED");
+  assert.deepEqual(events("callEnded").map(({ room }) => room).sort(), ["user:user-1", "user:user-2"]);
+  assert.deepEqual(closedRooms, ["room-1"]);
+});
+
+test("one person leaving a group call keeps it going for the rest", async () => {
+  const { call } = useCallStore({
+    status: "ACTIVE",
+    type: "group",
+    participants: [["user-1", "JOINED"], ["user-2", "JOINED"], ["user-3", "JOINED"]],
+  });
+  await callService.leaveCall("call-1", "user-3");
+  assert.equal(call.status, "ACTIVE");
+  assert.equal(events("callEnded").length, 0);
+  assert.equal(events("callParticipantUpdate").every(({ payload }) => payload.status === "LEFT"), true);
+});
+
+test("declining a 1:1 call stops the caller ringing", async () => {
+  const { call } = useCallStore({ participants: [["user-1", "ACCEPTED"], ["user-2", "RINGING"]] });
+  await callService.respondToCall("call-1", "user-2", "reject");
+  assert.equal(call.status, "REJECTED");
+  assert.equal(events("callEnded")[0].payload.status, "REJECTED");
+});
+
+test("the caller hanging up while it rings cancels the call", async () => {
+  const { call, parts } = useCallStore({ participants: [["user-1", "ACCEPTED"], ["user-2", "RINGING"]] });
+  await callService.leaveCall("call-1", "user-1");
+  assert.equal(call.status, "CANCELLED");
+  assert.equal(parts.find((p) => p.userId === "user-2").status, "MISSED");
+});
+
+test("a group member who missed the ring can still join the call in progress", async () => {
+  const { call, parts } = useCallStore({
+    status: "ACTIVE",
+    type: "group",
+    participants: [["user-1", "JOINED"], ["user-2", "JOINED"], ["user-3", "MISSED"]],
+  });
+  const result = await callService.joinCall("call-1", "user-3");
+  assert.equal(parts.find((p) => p.userId === "user-3").status, "ACCEPTED");
+  assert.equal(call.status, "ACTIVE");
+  assert.equal(typeof result.token, "string");
+  assert.equal(result.type, "AUDIO");
+});
+
+test("answering marks a ringing call active; the caller joining does not", async () => {
+  const { call } = useCallStore({ participants: [["user-1", "ACCEPTED"], ["user-2", "RINGING"]] });
+  await callService.joinCall("call-1", "user-1");
+  assert.equal(call.status, "RINGING");
+  await callService.joinCall("call-1", "user-2");
+  assert.equal(call.status, "ACTIVE");
 });

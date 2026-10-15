@@ -33,11 +33,32 @@ services:
   livekit:
     image: livekit/livekit-server:v1.13.7
     container_name: livekit_server
-    command: --dev --bind 0.0.0.0
+    command: --bind 0.0.0.0
+    # Keys and webhook settings come from this folder's .env, so LiveKit and the
+    # backend always share the same LIVEKIT_API_KEY / LIVEKIT_API_SECRET.
+    # node_ip is the address browsers send audio/video to (Docker's internal IP
+    # is unreachable from the host). For phones on your Wi-Fi, set
+    # LIVEKIT_NODE_IP to the PC's LAN IP and drop the 127.0.0.1 port bindings.
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: false
+          node_ip: ${LIVEKIT_NODE_IP:-127.0.0.1}
+        keys:
+          ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - ${LIVEKIT_WEBHOOK_URL:-http://host.docker.internal:3000/api/calls/livekit/webhook}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:7880:7880"
       - "127.0.0.1:7881:7881"
-      - "127.0.0.1:55000-55050:55000-55050/udp"
+      - "127.0.0.1:7882:7882/udp"
 
   redis-gui:
     image: rediscommander/redis-commander:latest

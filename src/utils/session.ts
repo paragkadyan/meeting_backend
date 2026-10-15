@@ -9,11 +9,16 @@ import { getTokenMaxAge } from './jwt';
  *    cookie jar reliably, so tokens travel in the response body and come back
  *    as `Authorization: Bearer` (access) or in the request body (refresh).
  */
+const readHeader = (req: Request, name: string): string | undefined => {
+  const value = req.headers?.[name];
+  return Array.isArray(value) ? value[0] : value;
+};
+
 export const isMobileClient = (req: Request): boolean =>
-  req.header('x-client-platform')?.trim().toLowerCase() === 'mobile';
+  readHeader(req, 'x-client-platform')?.trim().toLowerCase() === 'mobile';
 
 export const getBearerToken = (req: Request): string | undefined => {
-  const header = req.header('authorization');
+  const header = readHeader(req, 'authorization');
   if (!header?.startsWith('Bearer ')) return undefined;
   return header.slice(7).trim() || undefined;
 };
