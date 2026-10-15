@@ -11,6 +11,7 @@ process.env.JWT_ACCESS_SECRET = "access-secret-for-tests-only";
 const fakePrisma = {};
 const emitted = [];
 const closedRooms = [];
+const postedMessages = [];
 function setFakePrisma(next) {
   for (const key of Object.keys(fakePrisma)) delete fakePrisma[key];
   Object.assign(fakePrisma, next);
@@ -25,6 +26,9 @@ Module._load = function (request, parent, isMain) {
           to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }),
         }),
       };
+    }
+    if (request === "./message.service") {
+      return { createAndDeliverMessage: async (_io, message, options) => { postedMessages.push({ message, options }); return message; } };
     }
     if (request === "./livekit.service") {
       const real = originalLoad.call(this, request, parent, isMain);
@@ -186,7 +190,9 @@ function useCallStore({ status = "RINGING", type = "direct", participants }) {
     type: "AUDIO",
     status,
     createdAt: new Date(),
-    conversation: { type },
+    startedAt: status === "ACTIVE" ? new Date(Date.now() - 151_000) : null,
+    endedAt: null,
+    conversation: { type, participants: participants.map(([userId]) => ({ userId })) },
   };
   const parts = participants.map(([userId, partStatus]) => ({ callId: "call-1", userId, status: partStatus }));
   const withParticipants = (args = {}) => {
@@ -220,6 +226,7 @@ function useCallStore({ status = "RINGING", type = "direct", participants }) {
   });
   emitted.length = 0;
   closedRooms.length = 0;
+  postedMessages.length = 0;
   return { call, parts };
 }
 
@@ -278,4 +285,37 @@ test("answering marks a ringing call active; the caller joining does not", async
   assert.equal(call.status, "RINGING");
   await callService.joinCall("call-1", "user-2");
   assert.equal(call.status, "ACTIVE");
+});
+
+test("a finished call is added to the chat with its duration", async () => {
+  useCallStore({ status: "ACTIVE", participants: [["user-1", "JOINED"], ["user-2", "JOINED"]] });
+  await callService.leaveCall("call-1", "user-2");
+  assert.equal(postedMessages.length, 1);
+  const { message, options } = postedMessages[0];
+  assert.equal(message.messageType, "call");
+  assert.equal(message.senderId, "user-1");
+  assert.match(message.content, /^📞 Voice call · 2:3[0-9]$/);
+  const details = JSON.parse(message.systemType);
+  assert.equal(details.status, "ENDED");
+  assert.equal(details.callType, "AUDIO");
+  assert.ok(details.duration >= 150);
+  assert.deepEqual(options.unreadUserIds, []);
+  assert.deepEqual(options.pushUserIds, []);
+});
+
+test("an unanswered call shows as missed and is unread for the person rung", async () => {
+  useCallStore({ participants: [["user-1", "ACCEPTED"], ["user-2", "RINGING"]] });
+  await callService.leaveCall("call-1", "user-1");
+  const { message, options } = postedMessages[0];
+  assert.equal(message.content, "📞 Missed voice call");
+  assert.equal(JSON.parse(message.systemType).status, "CANCELLED");
+  assert.deepEqual(options.unreadUserIds, ["user-2"]);
+});
+
+test("a declined call is recorded as declined, without an unread badge", async () => {
+  useCallStore({ participants: [["user-1", "ACCEPTED"], ["user-2", "RINGING"]] });
+  await callService.respondToCall("call-1", "user-2", "reject");
+  const { message, options } = postedMessages[0];
+  assert.equal(message.content, "📞 Declined voice call");
+  assert.deepEqual(options.unreadUserIds, []);
 });

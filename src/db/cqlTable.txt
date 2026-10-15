@@ -6,8 +6,9 @@ CREATE TABLE messages (
   senderID UUID,          -- NULL for system messages
   content TEXT,           -- Optional for system messages
 
-  messageType TEXT,       -- 'text' | 'image' | 'video' | 'system'
+  messageType TEXT,       -- 'text' | 'image' | 'video' | 'system' | 'call'
   systemType TEXT,        -- 'user_joined' | 'user_left' | 'user_added' | 'user_kicked'
+                          -- for 'call' messages: JSON {callId, callType, status, duration, isGroup, busy?}
 
   actorId UUID,           -- who performed the action
   targetUserId UUID,      -- who was affected

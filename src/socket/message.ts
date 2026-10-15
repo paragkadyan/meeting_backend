@@ -38,6 +38,12 @@ export const handleMessages = async (io: Server, socket: Socket) => {
         return;
       }
 
+      // Call history entries are written by the server when a call ends (call.service).
+      if (messageType === 'call') {
+        socket.emit('error', { message: 'Invalid message type' });
+        return;
+      }
+
       if (!(await isActiveParticipant(convoId, userId))) {
         socket.emit('error', { message: 'You are not a member of this conversation' });
         return;

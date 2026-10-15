@@ -5,6 +5,7 @@ import { getIO } from "../socket";
 import { apiError } from "../utils/apiError";
 import { logger } from "../logger/logger";
 import { closeLiveKitRoomIfPresent, createParticipantToken, getRoomOccupancy } from "./livekit.service";
+import { createAndDeliverMessage } from "./message.service";
 
 /**
  * Call lifecycle
@@ -62,6 +63,81 @@ async function emitParticipantUpdate(callId: string, userId: string, status: Cal
   });
 }
 
+const formatDuration = (totalSeconds: number) => {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+};
+
+/**
+ * Adds the call to the chat as a `call` message from the caller. `content` is
+ * readable on its own (chat list preview, search, older app versions); the
+ * structured details for rendering are JSON in `systemType`.
+ */
+async function postCallHistoryMessage(callId: string) {
+  const call = await prisma.call.findUnique({
+    where: { id: callId },
+    select: {
+      convoId: true,
+      type: true,
+      status: true,
+      initiatedBy: true,
+      startedAt: true,
+      endedAt: true,
+      conversation: { select: { type: true, participants: { select: { userId: true } } } },
+      participants: { select: { userId: true, status: true } },
+    },
+  });
+  if (!call || !isTerminal(call.status)) return;
+
+  const isGroup = call.conversation.type === "group";
+  const answered = call.status === CallStatus.ENDED && Boolean(call.startedAt);
+  const duration = answered && call.endedAt && call.startedAt
+    ? Math.max(0, Math.round((call.endedAt.getTime() - call.startedAt.getTime()) / 1000))
+    : 0;
+  const invitees = call.participants.filter((p) => p.userId !== call.initiatedBy);
+  const busy = invitees.length > 0 && invitees.every((p) => p.status === CallParticipantStatus.BUSY);
+
+  const kind = `${isGroup ? "group " : ""}${call.type === CallType.VIDEO ? "video" : "voice"} call`;
+  const icon = call.type === CallType.VIDEO ? "📹" : "📞";
+  const content = answered
+    ? `${icon} ${kind[0].toUpperCase()}${kind.slice(1)} · ${formatDuration(duration)}`
+    : call.status === CallStatus.REJECTED && !busy
+      ? `${icon} Declined ${kind}`
+      : `${icon} Missed ${kind}`;
+
+  // Only people who were rung and never picked up get an unread badge.
+  const missedIds = invitees
+    .filter((p) => p.status === CallParticipantStatus.MISSED || p.status === CallParticipantStatus.BUSY)
+    .map((p) => p.userId);
+
+  await createAndDeliverMessage(
+    getIO(),
+    {
+      convoId: call.convoId,
+      senderId: call.initiatedBy,
+      content,
+      messageType: "call",
+      systemType: JSON.stringify({
+        callId,
+        callType: call.type,
+        status: call.status,
+        duration,
+        isGroup,
+        ...(busy && { busy: true }),
+      }),
+    },
+    {
+      participantIds: call.conversation.participants.map((p) => p.userId),
+      unreadUserIds: missedIds,
+      liveUnreadUserIds: missedIds,
+      pushUserIds: [],
+    }
+  );
+}
+
 /** Moves an open call to a final status, once. Safe to call concurrently. */
 async function finishCall(callId: string, roomName: string, status: CallStatus) {
   const result = await prisma.call.updateMany({
@@ -80,6 +156,11 @@ async function finishCall(callId: string, roomName: string, status: CallStatus) 
     data: { status: CallParticipantStatus.LEFT, leftAt: now },
   });
   emitToUsers(await getParticipantIds(callId), "callEnded", { callId, status });
+
+  // History is a side effect: a failure here must not undo or block the hang-up.
+  await postCallHistoryMessage(callId).catch((error) =>
+    logger.error("Failed to add call to chat history", { callId, error: error instanceof Error ? error.message : String(error) })
+  );
 
   // The call is already final, so a failure here only leaves an empty room behind
   // (LiveKit closes it on its own; a late join is refused by the webhook handler).
