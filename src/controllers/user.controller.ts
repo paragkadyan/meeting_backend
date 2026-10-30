@@ -507,8 +507,8 @@ export const inviteUser = asyncHandler(async (req: Request, res: Response) => {
     variables: {
       appName: "Heyllow",
       signupUrl: FRONTEND_ORIGIN as string,
-      firstName: user?.name as string,
-      lastName: user?.lname as string,
+      inviterFirstName: user?.name as string,
+      inviterLastName: user?.lname as string,
     },
   });
   const response = new apiResponse(200, {}, 'Invitation sent successfully.');
